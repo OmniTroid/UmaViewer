@@ -46,6 +46,10 @@ sysinfo.txt
 *.unitypackage
 crashlytics-build.properties
 
+# Local build logs
+/build.log
+/player-build.log
+
 # OS files
 .DS_Store
 Thumbs.db
