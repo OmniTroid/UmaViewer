@@ -2,6 +2,7 @@
 
 using System;
 using System.Runtime.InteropServices;
+using AOT;
 
 namespace SFB {
     public class StandaloneFileBrowserMac : IStandaloneFileBrowser {
@@ -9,36 +10,35 @@ namespace SFB {
         private static Action<string[]> _openFolderCb;
         private static Action<string> _saveFileCb;
 
-        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+        [DllImport("StandaloneFileBrowser")]
+        private static extern IntPtr DialogOpenFilePanel(string title, string directory, string extension, bool multiselect);
+        [DllImport("StandaloneFileBrowser")]
+        private static extern IntPtr DialogOpenFolderPanel(string title, string directory, bool multiselect);
+        [DllImport("StandaloneFileBrowser")]
+        private static extern IntPtr DialogSaveFilePanel(string title, string directory, string defaultName, string extension);
+        [DllImport("StandaloneFileBrowser")]
+        private static extern void DialogOpenFilePanelAsync(string title, string directory, string extension, bool multiselect, AsyncCallback callback);
+        [DllImport("StandaloneFileBrowser")]
+        private static extern void DialogOpenFolderPanelAsync(string title, string directory, bool multiselect, AsyncCallback callback);
+        [DllImport("StandaloneFileBrowser")]
+        private static extern void DialogSaveFilePanelAsync(string title, string directory, string defaultName, string extension, AsyncCallback callback);
+
         public delegate void AsyncCallback(string path);
 
-        [AOT.MonoPInvokeCallback(typeof(AsyncCallback))]
+        [MonoPInvokeCallback(typeof(AsyncCallback))]
         private static void openFileCb(string result) {
             _openFileCb.Invoke(result.Split((char)28));
         }
 
-        [AOT.MonoPInvokeCallback(typeof(AsyncCallback))]
+        [MonoPInvokeCallback(typeof(AsyncCallback))]
         private static void openFolderCb(string result) {
             _openFolderCb.Invoke(result.Split((char)28));
         }
 
-        [AOT.MonoPInvokeCallback(typeof(AsyncCallback))]
+        [MonoPInvokeCallback(typeof(AsyncCallback))]
         private static void saveFileCb(string result) {
             _saveFileCb.Invoke(result);
         }
-
-        [DllImport("StandaloneFileBrowser")]
-        private static extern IntPtr DialogOpenFilePanel(string title, string directory, string extension, bool multiselect);
-        [DllImport("StandaloneFileBrowser")]
-        private static extern void DialogOpenFilePanelAsync(string title, string directory, string extension, bool multiselect, AsyncCallback callback);
-        [DllImport("StandaloneFileBrowser")]
-        private static extern IntPtr DialogOpenFolderPanel(string title, string directory, bool multiselect);
-        [DllImport("StandaloneFileBrowser")]
-        private static extern void DialogOpenFolderPanelAsync(string title, string directory, bool multiselect, AsyncCallback callback);
-        [DllImport("StandaloneFileBrowser")]
-        private static extern IntPtr DialogSaveFilePanel(string title, string directory, string defaultName, string extension);
-        [DllImport("StandaloneFileBrowser")]
-        private static extern void DialogSaveFilePanelAsync(string title, string directory, string defaultName, string extension, AsyncCallback callback);
 
         public string[] OpenFilePanel(string title, string directory, ExtensionFilter[] extensions, bool multiselect) {
             var paths = Marshal.PtrToStringAnsi(DialogOpenFilePanel(
