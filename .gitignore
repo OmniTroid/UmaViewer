@@ -72,3 +72,5 @@ Thumbs.db
 
 # Contains machine-specific game paths and preferences
 /Config.json
+
+*.pyc
