@@ -96,6 +96,23 @@ and more
 
 <img src="https://user-images.githubusercontent.com/59540382/222422871-12e80e0b-778b-4f42-b581-5e4af5cd6df9.png" height="350" />
 
+### Native CySpring physics plugin (`native/CySpring/`)
+
+`native/CySpring/CySpringPlugin.cpp` is a portable reimplementation of the native cloth/spring-bone plugin used for hair and skirt physics. The upstream plugin ships only as Windows x64 DLLs (one per game region), so cloth physics is unavailable in native macOS/Linux builds. This reimplementation is plain C++ with no intrinsics or OS headers and builds for Windows x64 and macOS arm64/x86_64.
+
+It is a re-implementation. The exported entry points, the ABI, and all struct layouts are reproduced exactly; the collision and final-rotation math is a faithful reconstruction rather than a bit-exact transliteration.
+
+Build:
+
+```
+# macOS (arm64; add -arch x86_64 for universal)
+clang++ -std=c++11 -O2 -dynamiclib -arch arm64 -o CySpringPlugin.dylib native/CySpring/CySpringPlugin.cpp
+# Windows x64 (MSVC)
+cl /std:c++14 /O2 /LD native/CySpring/CySpringPlugin.cpp /Fe:CySpringPlugin.dll
+```
+
+To use it in a non-Windows build, place the built library in `Assets/Plugins/` and enable the matching platform on `Assets/Plugins/CySpringPlugin.dll`'s import settings.
+
 ### Also check out:
 [UmaChat by kagari](https://github.com/kagari-bi/UmaChat) - model viewer fork that lets you chat with Umas using AI + TTS
 
