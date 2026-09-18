@@ -22,6 +22,7 @@ CBUFFER_END
 TEXTURE2D(_MainTex);       SAMPLER(sampler_MainTex);
 TEXTURE2D(_ToonMap);       SAMPLER(sampler_ToonMap);
 TEXTURE2D(_TripleMaskMap);
+TEXTURE2D(_MaskColorTex);
 
 struct AttrToon { float4 positionOS : POSITION; float3 normalOS : NORMAL; float2 uv : TEXCOORD0; };
 struct VaryToon { float4 positionHCS : SV_POSITION; float2 uv : TEXCOORD0; float3 nWS : TEXCOORD1; float3 vWS : TEXCOORD2; };
@@ -61,14 +62,24 @@ half4 ToonShade(VaryToon IN, bool doCutout)
     float3 V = normalize(IN.vWS);
     Light L = GetMainLight();
 
-    // Base texture already carries costume colors; toon-darken toward shadow.
-    // (Zone recoloring via _TripleMaskMap is disabled: the real zone mask is a
-    //  separate texture not yet identified, and applying it here washed out.)
-    float toon = smoothstep(_ToonStep - _ToonFeather, _ToonStep + _ToonFeather, dot(N, L.direction) * 0.5 + 0.5);
-    half3 ramp = SAMPLE_TEXTURE2D(_ToonMap, sampler_ToonMap, float2(toon, 0.5)).rgb;
-    half3 col = baseCol.rgb * lerp(0.55, 1.0, toon) * ramp * L.color;
-    float rim = 1.0 - saturate(dot(V, N));
-    col += _RimColor.rgb * _RimColor.a * smoothstep(_RimStep - _RimFeather, _RimStep + _RimFeather, rim);
+    // Real Cygames toon model (from decompile): _ToonMap is the shadow-color texture
+    // (UmaViewer binds *shad_c), sampled at the main UV. 6-zone recoloring tints the
+    // lit diffuse by _MaskColor* and the shadow by _MaskToonColor* through _MaskColorTex
+    // (RGB channels split low/high). All default white, so this is a no-op on baked
+    // materials and applies on mask-colored costumes. Blend shadow<-lit by light angle.
+    half3 shadowTex = SAMPLE_TEXTURE2D(_ToonMap, sampler_ToonMap, IN.uv).rgb;
+    half3 area = SAMPLE_TEXTURE2D(_MaskColorTex, sampler_MainTex, IN.uv).rgb;
+    half3 lit    = ApplyZones(baseCol.rgb, area, _MaskColorR1,_MaskColorR2,_MaskColorG1,_MaskColorG2,_MaskColorB1,_MaskColorB2);
+    half3 shadow = ApplyZones(shadowTex,   area, _MaskToonColorR1,_MaskToonColorR2,_MaskToonColorG1,_MaskToonColorG2,_MaskToonColorB1,_MaskToonColorB2);
+    float hl = dot(N, L.direction) * 0.5 + 0.5;
+    float litAmt = saturate((hl - (_ToonStep - _ToonFeather)) / max(_ToonFeather * 2.0, 1e-4));
+    // Cap the lit blend below 1 so fully-lit, front-facing surfaces (e.g. the pants)
+    // still show the baked fold-shadows carried in the shadow texture.
+    litAmt = min(litAmt, 0.82);
+    half3 col = lerp(shadow, lit, litAmt) * L.color;
+
+    // Rim omitted for now: the real rim is view/light-dependent and shadow-masked;
+    // a naive fresnel drew white edges along every limb silhouette.
     return half4(col, baseCol.a);
 }
 

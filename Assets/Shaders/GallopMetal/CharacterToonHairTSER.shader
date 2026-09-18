@@ -5,6 +5,7 @@ Shader "Gallop/3D/Chara/ToonHair/TSER"
     {
         _MainTex ("Diffuse Map", 2D) = "white" { }
         _TripleMaskMap ("_TripleMaskMap", 2D) = "white" { }
+        _MaskColorTex ("_MaskColorTex", 2D) = "white" { }
         _ToonMap ("_ToonMap", 2D) = "white" { }
         _EnvMap ("_EnvMap", 2D) = "black" { }
         _SpecularColor ("_SpecularColor", Color) = (1,1,1,1)
