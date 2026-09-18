@@ -278,6 +278,20 @@ public class UmaContainerCharacter : UmaContainer
             {
                 Material mat = rend.sharedMaterials[i];
 
+                if (mat != null && mat.shader != null && !mat.shader.isSupported)
+                {
+                    var repl = Shader.Find(mat.shader.name);
+                    if (repl != null && repl.isSupported)
+                    {
+                        Debug.Log($"[MetalShaderSwap] replaced {mat.shader.name}");
+                        mat.shader = repl;
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"[MetalShaderSwap] no Metal replacement for {mat.shader.name}");
+                    }
+                }
+
                 var matHlp = Materials.FirstOrDefault(m => m.Mat == mat);
                 if (matHlp == null)
                 {
