@@ -964,6 +964,12 @@ public class UmaContainerCharacter : UmaContainer
         EnableEyeTracking = isOn;
     }
 
+    public void SetHeadTracking(bool isOn)
+    {
+        if (IK != null && IK.solvers != null && IK.solvers.lookAt != null)
+            IK.solvers.lookAt.IKPositionWeight = isOn ? 1f : 0f;
+    }
+
     public void SetFaceOverrideData(bool isOn)
     {
         FaceOverrideData?.SetEnable(isOn);

@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using UnityEngine;
@@ -94,24 +95,81 @@ public class CliExporter : MonoBehaviour
             AnimationClip clip = null;
             try { clip = anim.Get<AnimationClip>(); } catch { }
             container.LoadAnimation(anim);
+            // Head/eye look-at (FinalIK) aims at a camera-following target; headless
+            // that target is arbitrary and won't loop, so the head pops. Export the
+            // raw animation and let the consumer add look-at themselves.
+            container.SetHeadTracking(false);
+            container.EnableEyeTracking = false;
             float len = (clip != null && clip.length > 0.01f) ? clip.length : 5f;
+            bool isLoop = animId.Contains("loop") || (clip != null && clip.name.Contains("loop"));
+
+            // For a loop, let the crossfade finish and the motion settle so frame 0
+            // matches where the loop ends (warming whole periods also starts capture
+            // at the clip's own phase 0); otherwise the bind->idle blend makes the
+            // seam pop. Non-loop clips are recorded from the start.
+            if (isLoop)
+            {
+                float warm = 0f, warmTarget = Mathf.Max(1.5f, len * 2f);
+                while (warm < warmTarget) { warm += Time.deltaTime; yield return null; }
+            }
 
             var rootbone = container.transform.Find("Position");
             var rec = rootbone.gameObject.AddComponent<UnityHumanoidVMDRecorder>();
             rec.Initialize();
             yield return null;            // one frame so the animator is posed at t=0
             rec.StartRecording();
+            // For a loop, record one period minus a frame so the wrap (last frame ->
+            // frame 0) is a single step instead of a duplicate/hold.
+            float recLen = isLoop ? Mathf.Max(len - (1f / 30f), 0.1f) : len;
             float e2 = 0f;
-            while (e2 < len) { e2 += Time.deltaTime; yield return null; }
+            while (e2 < recLen) { e2 += Time.deltaTime; yield return null; }
             rec.StopRecording();
             string vmdPath = Path.Combine(outDir, $"{Path.GetFileNameWithoutExtension(pmxPath)}.vmd");
             try { rec.SaveVMD(Path.GetFileNameWithoutExtension(pmxPath), vmdPath); }
             catch (Exception ex) { Fail("VMD save threw: " + ex); yield break; }
+            // Drop the recorder's transient first frame (a stale head pose at capture
+            // start), so a loop wraps cleanly and frame 0 is the settled pose.
+            try { TrimFirstFrame(vmdPath); }
+            catch (Exception ex) { Debug.LogWarning("CLI_EXPORT: frame-0 trim skipped: " + ex); }
             Debug.Log("CLI_EXPORT: wrote " + vmdPath);
         }
 
         Debug.Log("CLI_EXPORT_DONE " + outDir);
         Quit(0);
+    }
+
+    // Drop every keyframe at frame 0 and shift the rest down by one, for the bone and
+    // morph sections; the camera/light/shadow/IK sections (empty here) are copied as-is.
+    static void TrimFirstFrame(string path)
+    {
+        byte[] d = File.ReadAllBytes(path);
+        var outp = new List<byte>(d.Length);
+        outp.AddRange(new ArraySegment<byte>(d, 0, 50)); // header(30) + model name(20)
+        int o = 50;
+        o = TrimSection(d, o, 111, outp);  // bones
+        o = TrimSection(d, o, 23, outp);   // morphs
+        outp.AddRange(new ArraySegment<byte>(d, o, d.Length - o)); // remaining sections
+        File.WriteAllBytes(path, outp.ToArray());
+    }
+
+    // A VMD keyframe section: int32 count, then `count` records of `recSize` bytes with
+    // the frame number at byte offset 15. Keeps frame>=1 records, renumbered frame-1.
+    static int TrimSection(byte[] d, int o, int recSize, List<byte> outp)
+    {
+        int count = BitConverter.ToInt32(d, o); o += 4;
+        var kept = new List<byte[]>(count);
+        for (int i = 0; i < count; i++, o += recSize)
+        {
+            uint fr = BitConverter.ToUInt32(d, o + 15);
+            if (fr < 1) continue;
+            var r = new byte[recSize];
+            Array.Copy(d, o, r, 0, recSize);
+            Array.Copy(BitConverter.GetBytes(fr - 1), 0, r, 15, 4);
+            kept.Add(r);
+        }
+        outp.AddRange(BitConverter.GetBytes(kept.Count));
+        foreach (var r in kept) outp.AddRange(r);
+        return o;
     }
 
     // Run a coroutine to completion, capturing any exception (so we can fail cleanly).
