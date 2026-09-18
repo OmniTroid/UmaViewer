@@ -46,9 +46,12 @@ sysinfo.txt
 *.unitypackage
 crashlytics-build.properties
 
-# Local build logs
-/build.log
-/player-build.log
+# Local logs (builds, headless exports, shader compiler)
+/logs/
+*.log
+
+# Headless CLI export output (PMX/VMD/textures)
+/export/
 
 # OS files
 .DS_Store

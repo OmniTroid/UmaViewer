@@ -19,7 +19,8 @@ if [ -e "$REPO/Temp/UnityLockfile" ]; then
   echo "Project is open in the Unity Editor. Quit it first (the build needs the lock)."; exit 1
 fi
 
-LOG="$REPO/player-build.log"
+mkdir -p "$REPO/logs"
+LOG="$REPO/logs/player-build.log"
 echo "Building Build/UmaViewer.app  (log: $LOG)"
 "$UNITY" -quit -batchmode -nographics -projectPath "$REPO" \
   -executeMethod HeadlessMacBuild.BuildMono -logFile "$LOG" || true
