@@ -13,6 +13,8 @@ using UnityEngine;
 //     --anim anm_eve_chr1127_00_idle01_loop --out ./export/1127 \
 //     -logFile ./logs/export.log [--region jp|global] [--blink] [--no-mouth]
 //
+// Model and motion are separable: omit --anim to export just the PMX (+textures); pass
+// --no-model with --anim to export just the VMD (reusing a model you exported once).
 // --blink injects a periodic eye-blink; --no-mouth strips the mouth vowel morphs so a
 // viewer can drive lip-sync live (together: a talkable loop). --seconds N records N
 // seconds raw (no loop trim) instead of one period.
@@ -63,6 +65,7 @@ public class CliExporter : MonoBehaviour
         float.TryParse(Opt("--seconds", "0"), out float recordSeconds);
         bool addBlink = Flag("--blink");    // inject a periodic まばたき (blink) track
         bool dropMouth = Flag("--no-mouth"); // strip mouth vowel morphs (drive them live)
+        bool noModel = Flag("--no-model");   // skip the PMX+textures, export only the VMD
 
         yield return null; // let scene Awake/Start run
 
@@ -88,11 +91,16 @@ public class CliExporter : MonoBehaviour
         if (container == null) { Fail("character build produced no container"); yield break; }
         yield return null;
 
-        // --- PMX (+ textures) ---
+        if (noModel && string.IsNullOrEmpty(animId)) { Fail("--no-model needs --anim (nothing to export)"); yield break; }
+
+        // --- PMX (+ textures) --- unless --no-model (reuse a previously exported model)
         string pmxPath = Path.Combine(outDir, $"chr{charaId}_{costume}.pmx");
-        try { ModelExporter.ExportModel(container, pmxPath); }
-        catch (Exception ex) { Fail("PMX export threw: " + ex); yield break; }
-        Debug.Log("CLI_EXPORT: wrote " + pmxPath);
+        if (!noModel)
+        {
+            try { ModelExporter.ExportModel(container, pmxPath); }
+            catch (Exception ex) { Fail("PMX export threw: " + ex); yield break; }
+            Debug.Log("CLI_EXPORT: wrote " + pmxPath);
+        }
 
         // --- VMD (one animation) ---
         if (!string.IsNullOrEmpty(animId))
