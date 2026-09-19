@@ -74,3 +74,4 @@ Thumbs.db
 /Config.json
 
 *.pyc
+dll/
