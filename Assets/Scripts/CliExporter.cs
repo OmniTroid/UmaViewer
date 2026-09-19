@@ -39,6 +39,11 @@ public class CliExporter : MonoBehaviour
     static void PreInit()
     {
         if (!Flag("--export")) return;
+        // This runs BeforeSceneLoad, ahead of the Awake that normally creates the Config,
+        // so Config.Instance is still null here. Create it now: the overrides below have to
+        // be in place before the database loads, and UmaViewerMain.Awake leaves an existing
+        // instance alone.
+        if (Config.Instance == null) new Config();
         // Point the runtime at the requested data folder before the DB loads in Awake.
         var dp = Opt("--data-path");
         if (!string.IsNullOrEmpty(dp)) Config.Instance.MainPath = dp;

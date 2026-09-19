@@ -33,7 +33,11 @@ public class UmaViewerMain : MonoBehaviour
     private void Awake()
     {
         Instance = this;
-        new Config();
+        // Only build a Config if nothing has already supplied one. The constructor resets
+        // MainPath to the default game folder, so constructing unconditionally discarded
+        // anything set earlier -- notably CliExporter's --data-path/--region, which run at
+        // BeforeSceneLoad. LiveViewerUI.Awake already guards the same way.
+        if (Config.Instance == null) new Config();
         ApplyFrameRateLimit();
 
         AbList = UmaDatabaseController.Instance.MetaEntries;
