@@ -113,6 +113,19 @@ cl /std:c++14 /O2 /LD native/CySpring/CySpringPlugin.cpp /Fe:CySpringPlugin.dll
 
 To use it in a non-Windows build, place the built library in `Assets/Plugins/` and enable the matching platform on `Assets/Plugins/CySpringPlugin.dll`'s import settings.
 
+### Headless model export (`--export`)
+
+`Assets/Scripts/CliExporter.cs` exports a character as an MMD PMX (+ textures) and, optionally, a VMD motion for tools like [babylon-mmd](https://github.com/noname0310/babylon-mmd), from the command line. Build the player first (`tools/build-mac.sh` on macOS), then:
+
+```
+Build/UmaViewer.app/Contents/MacOS/UmaViewer -batchmode \
+  --export --data-path /path/to/Persistent \
+  --chara 1127 --costume 00 --anim anm_eve_chr1127_00_idle01_loop \
+  --out ./export/1127 -logFile ./logs/export.log [--region jp|global]
+```
+
+Writes `chr<id>_<costume>.pmx`, its `Texture2D/` folder, and (with `--anim`) a matching `.vmd`. Run with `-batchmode` but **not** `-nographics` (a null GPU device loads no meshes). The PMX is a clean MMD skeleton (game control/IK bones stripped, weights baked to standard bones); `_loop` motions are exported as a seamless loop. Add `--blink` to bake a periodic eye-blink and `--no-mouth` to strip the mouth vowel morphs (so a viewer can drive lip-sync at runtime).
+
 ### Also check out:
 [UmaChat by kagari](https://github.com/kagari-bi/UmaChat) - model viewer fork that lets you chat with Umas using AI + TTS
 

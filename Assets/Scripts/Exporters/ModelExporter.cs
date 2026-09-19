@@ -126,6 +126,14 @@ public class ModelExporter
             {
                 isKeep = false;
             }
+            // Drop the model's Blender-style control rig (IK handles, offset/twist
+            // control bones). babylon-mmd expects a plain MMD skeleton and mangles
+            // these; skinning weights on them fall through to the nearest kept bone
+            // (see GetBoneIndex), so removing them is geometry-preserving at bind.
+            else if (IsControlBone(bName))
+            {
+                isKeep = false;
+            }
 
             if(isKeep)
             {
@@ -156,6 +164,8 @@ public class ModelExporter
         model.Morphs = ReadMorph(renderers);
         model.Rigidbodies = new MMDRigidBody[0];
         model.Joints = new MMDJoint[0];
+
+        ReorderLowerBody(model);
 
         return model;
     }
@@ -598,7 +608,9 @@ public class ModelExporter
             }
 
             pmxbone.Position = bone.position;
-            pmxbone.ParentIndex = bonelist.IndexOf(bone.parent);
+            // Skip filtered-out ancestors/children so the hierarchy stays intact
+            // after control bones are removed.
+            pmxbone.ParentIndex = bone.parent != null ? NearestKeptBone(bonelist, bone.parent) : -1;
             pmxbone.TransformLevel = 0;
             pmxbone.Visible = true;
             pmxbone.Movable = true;
@@ -607,7 +619,7 @@ public class ModelExporter
             pmxbone.ChildBoneVal = new Bone.ChildBone()
             {
                 ChildUseId = true,
-                Index = (bone.childCount > 0 ? bonelist.IndexOf(bone.GetChild(0)) : -1)
+                Index = FirstKeptDescendant(bonelist, bone)
             };
             pmxbones.Add(pmxbone);
 
@@ -911,6 +923,90 @@ public class ModelExporter
             }
         }
         return verticesList.ToArray();
+    }
+
+    // babylon-mmd and strict MMD loaders require a bone's parent to precede it. The
+    // virtual 下半身 is appended last but parents the thighs, so move it to just after
+    // Hip and remap every bone/vertex index so parents come first.
+    private static void ReorderLowerBody(RawMMDModel model)
+    {
+        var bones = model.Bones;
+        int n = bones.Length;
+        int src = Array.FindIndex(bones, b => b.NameEn == "LowerBody");
+        int anchor = Array.FindIndex(bones, b => b.NameEn == "Hip");
+        if (src < 0 || anchor < 0 || src == anchor + 1) return;
+
+        var order = new List<int>(n);
+        for (int i = 0; i < n; i++)
+        {
+            if (i == src) continue;
+            order.Add(i);
+            if (i == anchor) order.Add(src);
+        }
+        var map = new int[n];
+        for (int newIdx = 0; newIdx < order.Count; newIdx++) map[order[newIdx]] = newIdx;
+
+        var reordered = new Bone[n];
+        for (int newIdx = 0; newIdx < order.Count; newIdx++) reordered[newIdx] = bones[order[newIdx]];
+        foreach (var b in reordered)
+        {
+            if (b.ParentIndex >= 0) b.ParentIndex = map[b.ParentIndex];
+            if (b.ChildBoneVal != null && b.ChildBoneVal.Index >= 0) b.ChildBoneVal.Index = map[b.ChildBoneVal.Index];
+            if (b.IkInfoVal != null)
+            {
+                if (b.IkInfoVal.IkTargetIndex >= 0) b.IkInfoVal.IkTargetIndex = map[b.IkInfoVal.IkTargetIndex];
+                if (b.IkInfoVal.IkLinks != null)
+                    foreach (var lk in b.IkInfoVal.IkLinks)
+                        if (lk.LinkIndex >= 0) lk.LinkIndex = map[lk.LinkIndex];
+            }
+        }
+        model.Bones = reordered;
+
+        foreach (var v in model.Vertices)
+            RemapSkinBones(v.SkinningOperator, map);
+    }
+
+    private static void RemapSkinBones(SkinningOperator op, int[] map)
+    {
+        int Fix(int idx) => (idx >= 0 && idx < map.Length) ? map[idx] : idx;
+        switch (op.Param)
+        {
+            case Bdef1 b: b.BoneId = Fix(b.BoneId); break;
+            case Bdef2 b: for (int i = 0; i < b.BoneId.Length; i++) b.BoneId[i] = Fix(b.BoneId[i]); break;
+            case Bdef4 b: for (int i = 0; i < b.BoneId.Length; i++) b.BoneId[i] = Fix(b.BoneId[i]); break;
+            case Sdef b:  for (int i = 0; i < b.BoneId.Length; i++) b.BoneId[i] = Fix(b.BoneId[i]); break;
+        }
+    }
+
+    // Blender control-rig bones: IK handles/poles/targets and zero-length offset bones.
+    private static bool IsControlBone(string n)
+    {
+        return n.Contains("_Handle") || n.Contains("_offset")
+            || n.EndsWith("_Pole") || n.EndsWith("_Target");
+    }
+
+    // Nearest ancestor (self excluded) that survived filtering, or -1 for the root.
+    private static int NearestKeptBone(List<Transform> bones, Transform bone)
+    {
+        for (Transform cur = bone; cur != null; cur = cur.parent)
+        {
+            int idx = bones.IndexOf(cur);
+            if (idx >= 0) return idx;
+        }
+        return -1;
+    }
+
+    // First kept bone in a depth-first walk of this bone's descendants (display link).
+    private static int FirstKeptDescendant(List<Transform> bones, Transform bone)
+    {
+        foreach (Transform child in bone)
+        {
+            int idx = bones.IndexOf(child);
+            if (idx >= 0) return idx;
+            int deep = FirstKeptDescendant(bones, child);
+            if (deep >= 0) return deep;
+        }
+        return -1;
     }
 
     private static int GetBoneIndex(List<Transform> bones, Transform bone)

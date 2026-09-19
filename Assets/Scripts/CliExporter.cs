@@ -11,7 +11,11 @@ using UnityEngine;
 //   UmaViewer -batchmode --export \
 //     --data-path /path/to/Persistent --chara 1127 --costume 00 \
 //     --anim anm_eve_chr1127_00_idle01_loop --out ./export/1127 \
-//     -logFile ./logs/export.log [--region jp|global]
+//     -logFile ./logs/export.log [--region jp|global] [--blink] [--no-mouth]
+//
+// --blink injects a periodic eye-blink; --no-mouth strips the mouth vowel morphs so a
+// viewer can drive lip-sync live (together: a talkable loop). --seconds N records N
+// seconds raw (no loop trim) instead of one period.
 //
 // Run with -batchmode but NOT -nographics: character meshes/textures need a real
 // GfxDevice (a Null device loads nothing). macOS batchmode uses an offscreen Metal
@@ -54,6 +58,11 @@ public class CliExporter : MonoBehaviour
         string costume = Opt("--costume", "00");
         string animId = Opt("--anim");
         string outDir = Path.GetFullPath(Opt("--out", "export"));
+        // Optional: record this many seconds raw (no loop trimming) instead of one
+        // period, e.g. to capture several strides of a run for external loop-finding.
+        float.TryParse(Opt("--seconds", "0"), out float recordSeconds);
+        bool addBlink = Flag("--blink");    // inject a periodic まばたき (blink) track
+        bool dropMouth = Flag("--no-mouth"); // strip mouth vowel morphs (drive them live)
 
         yield return null; // let scene Awake/Start run
 
@@ -118,19 +127,23 @@ public class CliExporter : MonoBehaviour
             rec.Initialize();
             yield return null;            // one frame so the animator is posed at t=0
             rec.StartRecording();
-            // For a loop, record one period minus a frame so the wrap (last frame ->
-            // frame 0) is a single step instead of a duplicate/hold.
-            float recLen = isLoop ? Mathf.Max(len - (1f / 30f), 0.1f) : len;
+            // Capture a full period plus a small margin so frame P (== phase 0 of the
+            // next cycle) is present; the loop trim below keeps exactly one period.
+            // --seconds overrides this to record raw for external loop-finding.
+            float recLen = recordSeconds > 0f ? recordSeconds : (isLoop ? len + 0.1f : len);
             float e2 = 0f;
             while (e2 < recLen) { e2 += Time.deltaTime; yield return null; }
             rec.StopRecording();
             string vmdPath = Path.Combine(outDir, $"{Path.GetFileNameWithoutExtension(pmxPath)}.vmd");
             try { rec.SaveVMD(Path.GetFileNameWithoutExtension(pmxPath), vmdPath); }
             catch (Exception ex) { Fail("VMD save threw: " + ex); yield break; }
-            // Drop the recorder's transient first frame (a stale head pose at capture
-            // start), so a loop wraps cleanly and frame 0 is the settled pose.
-            try { TrimFirstFrame(vmdPath); }
-            catch (Exception ex) { Debug.LogWarning("CLI_EXPORT: frame-0 trim skipped: " + ex); }
+            // Drop the recorder's transient first frame (a stale pose at capture start).
+            // For a loop, keep exactly frames 1..P (P = one period) so the seam is a
+            // single step regardless of how fast the motion is; the wrap is phase0<-phaseP-1.
+            // With --seconds we keep everything (raw multi-period capture).
+            int period = (recordSeconds > 0f || !isLoop) ? int.MaxValue : Mathf.RoundToInt(len * 30f);
+            try { TrimLoop(vmdPath, period, dropMouth, addBlink); }
+            catch (Exception ex) { Debug.LogWarning("CLI_EXPORT: loop trim skipped: " + ex); }
             Debug.Log("CLI_EXPORT: wrote " + vmdPath);
         }
 
@@ -138,38 +151,108 @@ public class CliExporter : MonoBehaviour
         Quit(0);
     }
 
-    // Drop every keyframe at frame 0 and shift the rest down by one, for the bone and
-    // morph sections; the camera/light/shadow/IK sections (empty here) are copied as-is.
-    static void TrimFirstFrame(string path)
+    // Standard MMD mouth-shape morphs, dropped by --no-mouth so a viewer can drive
+    // lip-sync live. Expression morphs (笑い/怒り/まばたき…) are kept.
+    static readonly string[] MouthMorphs =
+        { "あ", "い", "う", "え", "お", "あ2", "い2", "う2", "え2", "お2", "▲", "□" };
+
+    // Drop the transient frame 0 and keep frames 1..period, renumbered to 0..period-1,
+    // for the bone and morph sections; camera/light/shadow/IK sections are copied as-is.
+    // A non-loop clip passes period=int.MaxValue (keep every frame after 0).
+    // dropMouth removes mouth morphs; addBlink replaces any blink track with one periodic
+    // blink over the loop.
+    static void TrimLoop(string path, int period, bool dropMouth, bool addBlink)
     {
+        var enc = ShiftJisOrUtf8();
         byte[] d = File.ReadAllBytes(path);
         var outp = new List<byte>(d.Length);
         outp.AddRange(new ArraySegment<byte>(d, 0, 50)); // header(30) + model name(20)
         int o = 50;
-        o = TrimSection(d, o, 111, outp);  // bones
-        o = TrimSection(d, o, 23, outp);   // morphs
+        int maxFrame = 0;
+        o = TrimBones(d, o, period, outp, ref maxFrame);
+        o = TrimMorphs(d, o, period, dropMouth, addBlink, maxFrame, enc, outp);
         outp.AddRange(new ArraySegment<byte>(d, o, d.Length - o)); // remaining sections
         File.WriteAllBytes(path, outp.ToArray());
     }
 
-    // A VMD keyframe section: int32 count, then `count` records of `recSize` bytes with
-    // the frame number at byte offset 15. Keeps frame>=1 records, renumbered frame-1.
-    static int TrimSection(byte[] d, int o, int recSize, List<byte> outp)
+    static System.Text.Encoding ShiftJisOrUtf8()
+    {
+        try { return System.Text.Encoding.GetEncoding("shift_jis"); }
+        catch { return System.Text.Encoding.UTF8; }
+    }
+
+    // Bone section (111-byte records, frame at offset 15): keep 1<=frame<=period,
+    // renumber frame-1; report the highest kept (renumbered) frame.
+    static int TrimBones(byte[] d, int o, int period, List<byte> outp, ref int maxFrame)
     {
         int count = BitConverter.ToInt32(d, o); o += 4;
         var kept = new List<byte[]>(count);
-        for (int i = 0; i < count; i++, o += recSize)
+        for (int i = 0; i < count; i++, o += 111)
         {
             uint fr = BitConverter.ToUInt32(d, o + 15);
-            if (fr < 1) continue;
-            var r = new byte[recSize];
-            Array.Copy(d, o, r, 0, recSize);
-            Array.Copy(BitConverter.GetBytes(fr - 1), 0, r, 15, 4);
+            if (fr < 1 || fr > (uint)period) continue;
+            var r = new byte[111];
+            Array.Copy(d, o, r, 0, 111);
+            uint nf = fr - 1;
+            Array.Copy(BitConverter.GetBytes(nf), 0, r, 15, 4);
+            if (nf > (uint)maxFrame) maxFrame = (int)nf;
             kept.Add(r);
         }
         outp.AddRange(BitConverter.GetBytes(kept.Count));
         foreach (var r in kept) outp.AddRange(r);
         return o;
+    }
+
+    // Morph section (23-byte records: 15-byte name, 4-byte frame, 4-byte weight). Same
+    // keep/renumber as bones, minus mouth morphs (dropMouth) and any existing blink when
+    // addBlink is set; a synthesized periodic blink is then appended.
+    static int TrimMorphs(byte[] d, int o, int period, bool dropMouth, bool addBlink,
+                          int maxFrame, System.Text.Encoding enc, List<byte> outp)
+    {
+        byte[] blinkName = enc.GetBytes("まばたき");
+        int count = BitConverter.ToInt32(d, o); o += 4;
+        var kept = new List<byte[]>(count);
+        for (int i = 0; i < count; i++, o += 23)
+        {
+            string name = NameAt(d, o, enc);
+            uint fr = BitConverter.ToUInt32(d, o + 15);
+            if (fr < 1 || fr > (uint)period) continue;
+            if (dropMouth && Array.IndexOf(MouthMorphs, name) >= 0) continue;
+            if (addBlink && name == "まばたき") continue;
+            var r = new byte[23];
+            Array.Copy(d, o, r, 0, 23);
+            Array.Copy(BitConverter.GetBytes(fr - 1), 0, r, 15, 4);
+            kept.Add(r);
+        }
+        if (addBlink)
+            foreach (var (f, w) in BlinkKeys(maxFrame))
+                kept.Add(MorphRecord(blinkName, f, w));
+        outp.AddRange(BitConverter.GetBytes(kept.Count));
+        foreach (var r in kept) outp.AddRange(r);
+        return o;
+    }
+
+    static string NameAt(byte[] d, int o, System.Text.Encoding enc)
+    {
+        int n = 0; while (n < 15 && d[o + n] != 0) n++;
+        return enc.GetString(d, o, n);
+    }
+
+    // One 0->1->0 blink at the loop midpoint (clamped for very short loops).
+    static (int, float)[] BlinkKeys(int maxFrame)
+    {
+        if (maxFrame < 6) return new[] { (0, 0f), (Math.Max(1, maxFrame / 2), 1f), (maxFrame, 0f) };
+        int c = maxFrame / 2;
+        return new[] { (0, 0f), (c - 2, 0f), (c, 1f), (c + 3, 0f), (maxFrame, 0f) };
+    }
+
+    static byte[] MorphRecord(byte[] name, int frame, float weight)
+    {
+        var r = new byte[23];
+        Array.Copy(name, 0, r, 0, Math.Min(name.Length, 15));
+        Array.Copy(BitConverter.GetBytes((uint)frame), 0, r, 15, 4);
+        Array.Copy(BitConverter.GetBytes(weight), 0, r, 19, 4);
+        return r;
     }
 
     // Run a coroutine to completion, capturing any exception (so we can fail cleanly).
