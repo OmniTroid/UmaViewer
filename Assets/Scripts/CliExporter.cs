@@ -212,6 +212,13 @@ public class CliExporter : MonoBehaviour
             int prevCapture = Time.captureFramerate;
             float prevFixed = Time.fixedDeltaTime;
             int prevWorkers = Unity.Jobs.LowLevel.Unsafe.JobsUtility.JobWorkerCount;
+            // Recording runs at 30, which is both the animation sampling rate and what a VMD
+            // frame number means. Stepping the physics at 60 here is NOT simply a matter of
+            // shortening fixedDeltaTime: under Time.captureFramerate Unity runs one
+            // FixedUpdate per rendered frame whatever fixedDeltaTime says, so SaveFrame's
+            // rate and the physics rate cannot be separated from inside this loop. Baked
+            // spring motion is therefore captured at a 30fps step, which is not what the game
+            // runs -- see --physics-fps on RecordPhysicsRef for the measured difference.
             Time.captureFramerate = 30;
             Time.fixedDeltaTime = 1f / 30f;
             Unity.Jobs.LowLevel.Unsafe.JobsUtility.JobWorkerCount = 0;

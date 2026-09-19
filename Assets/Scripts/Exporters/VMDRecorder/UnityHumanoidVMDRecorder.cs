@@ -263,10 +263,17 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
         animator.Play(state.shortNameHash, 0, state.normalizedTime);
     }
 
+    /// Record one frame per N physics steps. The rate CySpring is stepped at and the rate the
+    /// VMD is sampled at are different things: CySpring's constants are per-step so it has to
+    /// run at the rate the game uses (60), while a VMD frame is 1/30s. Stride 2 satisfies both.
+    public int CaptureStride = 1;
+    int strideTick;
+
     private void FixedUpdate()
     {
         if (IsRecording && !IsLive)
         {
+            if (CaptureStride > 1 && (strideTick++ % CaptureStride) != 0) { return; }
             SaveFrame();
             FrameNumber++;
         }
@@ -499,6 +506,7 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
         }
 
         SetInitialPositionAndRotation();
+        strideTick = 0;
         IsRecording = true;
         IsLive = islive;
 
