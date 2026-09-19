@@ -120,6 +120,17 @@ public class CliExporter : MonoBehaviour
             float len = (clip != null && clip.length > 0.01f) ? clip.length : 5f;
             bool isLoop = animId.Contains("loop") || (clip != null && clip.name.Contains("loop"));
 
+            // Deterministic capture: lock game time to a fixed 1/30 step (frame count and
+            // pose sampling no longer depend on wall-clock speed), and force the job system
+            // single-threaded so parallel animation/physics FP reductions are bit-stable
+            // (their thread-order otherwise jitters poses ~0.3 deg run to run). Restored after.
+            int prevCapture = Time.captureFramerate;
+            float prevFixed = Time.fixedDeltaTime;
+            int prevWorkers = Unity.Jobs.LowLevel.Unsafe.JobsUtility.JobWorkerCount;
+            Time.captureFramerate = 30;
+            Time.fixedDeltaTime = 1f / 30f;
+            Unity.Jobs.LowLevel.Unsafe.JobsUtility.JobWorkerCount = 0;
+
             // For a loop, let the crossfade finish and the motion settle so frame 0
             // matches where the loop ends (warming whole periods also starts capture
             // at the clip's own phase 0); otherwise the bind->idle blend makes the
@@ -142,6 +153,9 @@ public class CliExporter : MonoBehaviour
             float e2 = 0f;
             while (e2 < recLen) { e2 += Time.deltaTime; yield return null; }
             rec.StopRecording();
+            Time.captureFramerate = prevCapture;
+            Time.fixedDeltaTime = prevFixed;
+            Unity.Jobs.LowLevel.Unsafe.JobsUtility.JobWorkerCount = prevWorkers;
             string vmdPath = Path.Combine(outDir, $"{Path.GetFileNameWithoutExtension(pmxPath)}.vmd");
             try { rec.SaveVMD(Path.GetFileNameWithoutExtension(pmxPath), vmdPath); }
             catch (Exception ex) { Fail("VMD save threw: " + ex); yield break; }
