@@ -8,10 +8,16 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 VER="2022.3.62f3"
 
+# Unity.exe is a native Windows binary: hand it Windows paths, not MSYS ones.
+winpath() { if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else printf %s "$1"; fi; }
+
 UNITY=""
 for c in \
   "/Applications/Unity/Hub/Editor/$VER/Unity.app/Contents/MacOS/Unity" \
-  "/Applications/Unity/Unity.app/Contents/MacOS/Unity"; do
+  "/Applications/Unity/Unity.app/Contents/MacOS/Unity" \
+  "/c/Program Files/Unity/Hub/Editor/$VER/Editor/Unity.exe" \
+  "/c/Program Files/Unity/Editor/Unity.exe" \
+  "${PROGRAMFILES:-/c/Program Files}/Unity/Hub/Editor/$VER/Editor/Unity.exe"; do
   [ -x "$c" ] && UNITY="$c" && break
 done
 [ -n "$UNITY" ] || { echo "Unity $VER not found (install via Unity Hub)"; exit 1; }
@@ -23,8 +29,8 @@ fi
 mkdir -p "$REPO/logs"
 LOG="$REPO/logs/player-build-win.log"
 echo "Building Build/Windows/UmaViewer.exe  (log: $LOG)"
-"$UNITY" -quit -batchmode -nographics -projectPath "$REPO" -buildTarget Win64 \
-  -executeMethod HeadlessWinBuild.BuildMono -logFile "$LOG" || true
+"$UNITY" -quit -batchmode -nographics -projectPath "$(winpath "$REPO")" -buildTarget Win64 \
+  -executeMethod HeadlessWinBuild.BuildMono -logFile "$(winpath "$LOG")" || true
 
 if grep -q "BUILD_OK" "$LOG"; then
   echo "OK -> $REPO/Build/Windows/UmaViewer.exe"
