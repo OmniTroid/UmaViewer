@@ -38,7 +38,15 @@ if [ -z "$BIN" ]; then
   done
 fi
 [ -n "$BIN" ] || { echo "UmaViewer player not found; build it (tools/build-mac.sh or build-win.sh) or set UMAVIEWER_BIN"; exit 1; }
-PY="$(command -v python3 || command -v python || true)"
+# Probe rather than trust the first hit: on Windows, python3 usually resolves to the
+# Microsoft Store alias stub, which exists on PATH but exits with "Python was not found"
+# instead of running anything.
+PY=""
+for c in python3 python py; do
+  p="$(command -v "$c" 2>/dev/null)" || continue
+  [ -n "$p" ] || continue
+  if "$p" -c "import sys" >/dev/null 2>&1; then PY="$p"; break; fi
+done
 [ -n "$PY" ] || { echo "python not found"; exit 1; }
 
 mkdir -p "$OUT" "$REPO/logs"; RAW="$OUT/.raw"; mkdir -p "$RAW"
