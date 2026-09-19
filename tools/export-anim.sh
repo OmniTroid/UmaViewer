@@ -7,7 +7,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"; REPO="$(cd "$HERE/.." && pwd)"
 
 DATA=""; CHARA=""; ANIM=""; OUT=""; REGION="jp"; COSTUME="00"; SECS=5; TILES=1; BLINK=""; NOMOUTH=""
-PMXNAME=""; VMDNAME=""
+PMXNAME=""; VMDNAME=""; BAKE=""
 while [ $# -gt 0 ]; do case "$1" in
   --data-path) DATA="$2"; shift 2;;
   --chara)     CHARA="$2"; shift 2;;
@@ -21,13 +21,14 @@ while [ $# -gt 0 ]; do case "$1" in
   --no-mouth)  NOMOUTH="--no-mouth"; shift;;
   --pmx-name)  PMXNAME="$2"; shift 2;;
   --vmd-name)  VMDNAME="$2"; shift 2;;
+  --bake-physics) BAKE="--bake-physics"; shift;;
   *) echo "unknown arg: $1"; exit 1;;
 esac; done
 
 if [ -z "$DATA" ] || [ -z "$CHARA" ] || [ -z "$ANIM" ] || [ -z "$OUT" ]; then
   echo "usage: $0 --data-path DIR --chara ID --anim NAME --out DIR \\"
   echo "          [--region jp|global] [--costume 00] [--seconds 5] [--tiles N] [--blink] [--no-mouth] \\"
-  echo "          [--pmx-name model.pmx] [--vmd-name running.vmd]"
+  echo "          [--pmx-name model.pmx] [--vmd-name running.vmd] [--bake-physics]"
   exit 1
 fi
 
@@ -62,7 +63,7 @@ VMDFILE="${VMDNAME:-${PMXFILE%.pmx}.vmd}"; case "$VMDFILE" in *.vmd) ;; *) VMDFI
 echo "Recording ${SECS}s of $ANIM (chara $CHARA) ..."
 "$BIN" -batchmode --export --data-path "$DATA" --region "$REGION" \
   --chara "$CHARA" --costume "$COSTUME" --anim "$ANIM" --seconds "$SECS" \
-  --pmx-name "$PMXFILE" --vmd-name "$VMDFILE" \
+  --pmx-name "$PMXFILE" --vmd-name "$VMDFILE" $BAKE \
   --out "$RAW" -logFile "$REPO/logs/export-anim.log"
 
 [ -f "$RAW/$VMDFILE" ] || { echo "raw export failed; see logs/export-anim.log"; exit 1; }
