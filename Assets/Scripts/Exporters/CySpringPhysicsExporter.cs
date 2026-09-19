@@ -63,8 +63,11 @@ public static class CySpringPhysicsExporter
         var joints = new List<MMDJoint>();
         var bodyOf = new Dictionary<int, int>();
 
-        int colliders = AddColliders(container, model, idx, bodies);
-        if (colliders == 0) AddFallbackLegColliders(model, idx, bodies);
+        AddColliders(container, model, idx, bodies);
+        // Always add leg capsules: CySpring's own colliders here are mostly hip/skirt-panel
+        // shapes, and the knee/ankle leg-avoidance colliders live in SkirtController (not
+        // read), so without these the leg clips through the skirt.
+        AddLegColliders(model, idx, bodies);
 
         var rootSet = new HashSet<int>();
         foreach (var rn in roots) if (idx.TryGetValue(rn, out int ri)) rootSet.Add(ri);
@@ -127,14 +130,14 @@ public static class CySpringPhysicsExporter
         return n;
     }
 
-    // If CySpring collision wasn't resolved (e.g. plugin not loaded), put capsules on the legs
-    // so the skirt still has something to collide against instead of clipping through.
-    static void AddFallbackLegColliders(RawMMDModel model, Dictionary<string, int> idx, List<MMDRigidBody> bodies)
+    // Capsules covering the legs so the skirt collides with them instead of clipping.
+    // Radii are a bit larger than the visible leg so the cloth is held clear of the mesh.
+    static void AddLegColliders(RawMMDModel model, Dictionary<string, int> idx, List<MMDRigidBody> bodies)
     {
         (string a, string b, float r)[] segs =
         {
-            ("Thigh_L", "Knee_L", 0.09f), ("Knee_L", "Ankle_L", 0.07f),
-            ("Thigh_R", "Knee_R", 0.09f), ("Knee_R", "Ankle_R", 0.07f),
+            ("Thigh_L", "Knee_L", 0.12f), ("Knee_L", "Ankle_L", 0.09f),
+            ("Thigh_R", "Knee_R", 0.12f), ("Knee_R", "Ankle_R", 0.09f),
         };
         foreach (var s in segs)
         {
@@ -178,18 +181,23 @@ public static class CySpringPhysicsExporter
 
     static MMDJoint MakeJoint(RawMMDModel model, int bone, int bodyA, int bodyB, P p)
     {
-        float degLimit = p.limited ? Mathf.Max(1f, Mathf.Min(Mathf.Abs(p.lmax.x), Mathf.Min(Mathf.Abs(p.lmax.y), Mathf.Abs(p.lmax.z)))) : 40f;
+        string name = model.Bones[bone].NameEn ?? "";
+        // Jiggle bones (bust, chest accessories) are short chains that should hold their rest
+        // shape and only wobble slightly: tight limits + a restoring spring stop them folding
+        // in on themselves. Cloth (skirt/hair/tail/ear) wants loose limits + no spring so it
+        // hangs and swings freely (a spring there oscillates -> jitter).
+        bool jiggle = name.Contains("Bust") || name.Contains("Ch_Acc");
+        float degLimit = jiggle ? 8f : (p.limited ? Mathf.Max(1f, Mathf.Min(Mathf.Abs(p.lmax.x), Mathf.Min(Mathf.Abs(p.lmax.y), Mathf.Abs(p.lmax.z)))) : 40f);
         float rad = Mathf.Min(degLimit, 90f) * Mathf.Deg2Rad;
+        var spring = jiggle ? new Vector3(20f, 20f, 20f) : Vector3.zero;
         return new MMDJoint
         {
-            Name = model.Bones[bone].NameEn, NameEn = model.Bones[bone].NameEn,
+            Name = name, NameEn = name,
             AssociatedRigidBodyIndex = new[] { bodyA, bodyB },
             Position = model.Bones[bone].Position, Rotation = Vector3.zero,
             PositionLowLimit = Vector3.zero, PositionHiLimit = Vector3.zero,
             RotationLowLimit = new Vector3(-rad, -rad, -rad), RotationHiLimit = new Vector3(rad, rad, rad),
-            // No rotational spring: rotation limits + high body damping keep the chain stable.
-            // A stiff spring here fights the limits and oscillates (jitter).
-            SpringTranslate = Vector3.zero, SpringRotate = Vector3.zero,
+            SpringTranslate = Vector3.zero, SpringRotate = spring,
         };
     }
 
