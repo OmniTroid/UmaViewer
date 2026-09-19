@@ -76,6 +76,12 @@ public class CliExporter : MonoBehaviour
         bool addBlink = Flag("--blink");    // inject a periodic まばたき (blink) track
         bool dropMouth = Flag("--no-mouth"); // strip mouth vowel morphs (drive them live)
         bool noModel = Flag("--no-model");   // skip the PMX+textures, export only the VMD
+        // --bake-physics: record the CySpring-simulated spring bones as VMD tracks and write
+        // the PMX without rigid bodies, instead of shipping bodies for a runtime to simulate.
+        // CySpring is a Verlet solver with a hard length constraint; PMX physics is rigid
+        // bodies and 6DOF springs, so the runtime can only approximate it. Baking ships the
+        // solver's own output. The cost is that the cloth no longer reacts at runtime.
+        bool bakePhysics = Flag("--bake-physics");
 
         yield return null; // let scene Awake/Start run
 
@@ -156,9 +162,29 @@ public class CliExporter : MonoBehaviour
         string pmxPath = Path.Combine(outDir, WithExtension(Opt("--pmx-name"), $"chr{charaId}_{costume}", ".pmx"));
         if (!noModel)
         {
+            ModelExporter.BakeSpringBones = bakePhysics;
             try { ModelExporter.ExportModel(container, pmxPath); }
             catch (Exception ex) { Fail("PMX export threw: " + ex); yield break; }
             Debug.Log("CLI_EXPORT: wrote " + pmxPath);
+        }
+
+        // Spring bones and the pose the PMX was written in. ExportModel disables physics and
+        // leaves the model at rest, which is exactly the bind pose a VMD rotation is relative
+        // to, so capture it here -- by the time the recorder exists the animation has moved on.
+        var springBind = new Dictionary<string, Quaternion>();
+        var springXf = new Dictionary<string, Transform>();
+        if (bakePhysics)
+        {
+            foreach (var tr in container.GetComponentsInChildren<Transform>(true))
+            {
+                if (!SpringBoneNames.IsSpringBone(tr.name) || springXf.ContainsKey(tr.name)) continue;
+                springXf[tr.name] = tr;
+                springBind[tr.name] = tr.localRotation;
+            }
+            // Physics is off after the PMX export; baking needs it running to record.
+            container.EnablePhysics = true;
+            container.SetDynamicBoneEnable(true);
+            Debug.Log($"CLI_EXPORT: baking {springXf.Count} spring bones (PMX written without rigid bodies)");
         }
 
         // --- VMD (one animation) ---
@@ -203,6 +229,15 @@ public class CliExporter : MonoBehaviour
             var rootbone = container.transform.Find("Position");
             var rec = rootbone.gameObject.AddComponent<UnityHumanoidVMDRecorder>();
             rec.Initialize();
+            if (bakePhysics)
+            {
+                // Short names so each track fits the VMD's 15-byte field and matches the PMX
+                // primary name ModelExporter wrote for the same bone.
+                var shortNames = SpringBoneNames.BuildMap(springXf.Keys);
+                foreach (var kv in shortNames)
+                    rec.AddExtraBone(kv.Value, springXf[kv.Key], springBind[kv.Key]);
+                Debug.Log($"CLI_EXPORT: registered {rec.ExtraBoneCount} baked spring tracks");
+            }
             yield return null;            // one frame so the animator is posed at t=0
             rec.StartRecording();
             // Capture a full period plus a small margin so frame P (== phase 0 of the

@@ -55,6 +55,37 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
     Dictionary<BoneNames, List<Vector3>> positionDictionarySaved = new Dictionary<BoneNames, List<Vector3>>();
     Dictionary<BoneNames, List<Quaternion>> rotationDictionary = new Dictionary<BoneNames, List<Quaternion>>();
     public Dictionary<BoneNames, List<Quaternion>> rotationDictionarySaved { get; private set; } = new Dictionary<BoneNames, List<Quaternion>>();
+
+    // Tracks outside the humanoid BoneNames enum. CySpring spring bones are registered here so
+    // a baked motion can carry the cloth itself, instead of shipping rigid bodies and leaving a
+    // physics runtime to approximate a Verlet solver it does not match.
+    struct ExtraBone { public string Name; public Transform Bone; public Quaternion Bind; }
+    readonly List<ExtraBone> extraBones = new List<ExtraBone>();
+    Dictionary<string, List<Quaternion>> extraRotationDictionary = new Dictionary<string, List<Quaternion>>();
+    Dictionary<string, List<Quaternion>> extraRotationDictionarySaved = new Dictionary<string, List<Quaternion>>();
+
+    /// Record <paramref name="bone"/> under an explicit VMD track name, which must fit the
+    /// format's 15-byte field (see SpringBoneNames). Call before StartRecording, with the model
+    /// in the pose the PMX was exported from: a PMX bone carries no bind rotation, so an
+    /// identity VMD rotation means "as exported", and every frame is stored relative to the
+    /// pose captured here.
+    public void AddExtraBone(string vmdName, Transform bone)
+    {
+        AddExtraBone(vmdName, bone, bone != null ? bone.localRotation : Quaternion.identity);
+    }
+
+    /// As above, but with the bind pose supplied explicitly. The PMX is written before the
+    /// animation loads and with physics disabled, so the pose it was exported from is gone by
+    /// the time the recorder exists -- the caller captures it at export time and passes it here.
+    public void AddExtraBone(string vmdName, Transform bone, Quaternion bind)
+    {
+        if (string.IsNullOrEmpty(vmdName) || bone == null) return;
+        if (extraRotationDictionary.ContainsKey(vmdName)) return;
+        extraBones.Add(new ExtraBone { Name = vmdName, Bone = bone, Bind = bind });
+        extraRotationDictionary[vmdName] = new List<Quaternion>();
+    }
+
+    public int ExtraBoneCount => extraBones.Count;
     Dictionary<int, bool> visitableDictionary = new Dictionary<int, bool>();
 
     [Serializable]
@@ -407,6 +438,16 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
                 positionDictionary[boneName].Add(vmdPosition * DefaultBoneAmplifier);
             }
         }
+
+        // Extra tracks: delta from the registered bind pose, in MMD's flipped axes. Spring
+        // bones are rotation-only -- their translation belongs to the parent chain.
+        for (int e = 0; e < extraBones.Count; e++)
+        {
+            var ex = extraBones[e];
+            if (ex.Bone == null) { extraRotationDictionary[ex.Name].Add(Quaternion.identity); continue; }
+            Quaternion d = Quaternion.Inverse(ex.Bind) * ex.Bone.localRotation;
+            extraRotationDictionary[ex.Name].Add(new Quaternion(-d.x, d.y, -d.z, d.w));
+        }
     }
 
     void LiveSaveFrame()
@@ -493,6 +534,9 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
             positionDictionary.Add(boneName, new List<Vector3>());
             rotationDictionary.Add(boneName, new List<Quaternion>());
         }
+        extraRotationDictionarySaved = extraRotationDictionary;
+        extraRotationDictionary = new Dictionary<string, List<Quaternion>>();
+        foreach (var ex in extraBones) extraRotationDictionary[ex.Name] = new List<Quaternion>();
         morphRecorder = new MorphRecorder(transform);
         
         if (IsLive)
@@ -563,8 +607,27 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
                         }
                     }
                 }
+                // Extra named tracks keep every frame, deliberately ignoring KeyReductionLevel.
+                // Dropping keys is fine for body motion, but these carry simulated cloth that
+                // moves up to ~33 deg per frame; halving the rate and interpolating linearly
+                // between keys would discard exactly the detail a bake exists to preserve.
+                void LoopWithExtraCondition(Action<string, int> action)
+                {
+                    for (int i = 0; i < frameNumberSaved; i++)
+                    {
+                        for (int e = 0; e < extraBones.Count; e++)
+                        {
+                            string n = extraBones[e].Name;
+                            if (!extraRotationDictionarySaved.ContainsKey(n)) { continue; }
+                            if (i >= extraRotationDictionarySaved[n].Count) { continue; }
+                            action(n, i);
+                        }
+                    }
+                }
+
                 uint allKeyFrameNumber = 0;
                 LoopWithBoneCondition((a, b) => { allKeyFrameNumber++; });
+                LoopWithExtraCondition((a, b) => { allKeyFrameNumber++; });
                 byte[] allKeyFrameNumberByte = BitConverter.GetBytes(allKeyFrameNumber);
                 binaryWriter.Write(allKeyFrameNumberByte, 0, intByteLength);
 
@@ -621,6 +684,38 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
                     byte[] interpolateBytes = new byte[64];
                     binaryWriter.Write(interpolateBytes, 0, 64);
                 });
+                uint extraWritten = 0;
+                LoopWithExtraCondition((trackName, i) =>
+                {
+                    extraWritten++;
+                    const int boneNameLength = 15;
+                    byte[] nameBytes = System.Text.Encoding.GetEncoding(ShiftJIS).GetBytes(trackName);
+                    // SpringBoneNames guarantees the fit; truncating here would silently alias
+                    // two tracks onto one bone, so drop the frame instead and say so.
+                    if (nameBytes.Length > boneNameLength)
+                    {
+                        Debug.LogWarning($"VMD: track name too long, skipped: {trackName}");
+                        return;
+                    }
+                    binaryWriter.Write(nameBytes, 0, nameBytes.Length);
+                    binaryWriter.Write(new byte[boneNameLength - nameBytes.Length], 0, boneNameLength - nameBytes.Length);
+
+                    binaryWriter.Write(BitConverter.GetBytes((uint)i), 0, intByteLength);
+
+                    // Rotation only: no translation on a spring bone.
+                    binaryWriter.Write(BitConverter.GetBytes(0f), 0, intByteLength);
+                    binaryWriter.Write(BitConverter.GetBytes(0f), 0, intByteLength);
+                    binaryWriter.Write(BitConverter.GetBytes(0f), 0, intByteLength);
+
+                    Quaternion r = extraRotationDictionarySaved[trackName][i];
+                    binaryWriter.Write(BitConverter.GetBytes(r.x), 0, intByteLength);
+                    binaryWriter.Write(BitConverter.GetBytes(r.y), 0, intByteLength);
+                    binaryWriter.Write(BitConverter.GetBytes(r.z), 0, intByteLength);
+                    binaryWriter.Write(BitConverter.GetBytes(r.w), 0, intByteLength);
+
+                    binaryWriter.Write(new byte[64], 0, 64);
+                });
+                if (extraBones.Count > 0) Debug.Log($"VMD Extra (spring) frames written: {extraWritten} over {extraBones.Count} tracks");
                 Debug.Log($"VMD Bones frames written: {boneWritten}");
 
                 //全モーフフレーム数の書き込み
