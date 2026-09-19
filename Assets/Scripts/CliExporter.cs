@@ -15,6 +15,9 @@ using UnityEngine;
 //     --anim anm_eve_chr1127_00_idle01_loop --out ./export/1127 \
 //     -logFile ./logs/export.log [--region jp|global] [--blink] [--no-mouth]
 //
+// --pmx-name / --vmd-name override the generated chr<id>_<costume> filenames; the
+// extension is optional, and the VMD defaults to the model's stem.
+//
 // Model and motion are separable: omit --anim to export just the PMX (+textures); pass
 // --no-model with --anim to export just the VMD (reusing a model you exported once).
 // --blink injects a periodic eye-blink; --no-mouth strips the mouth vowel morphs so a
@@ -113,7 +116,8 @@ public class CliExporter : MonoBehaviour
         if (noModel && string.IsNullOrEmpty(animId)) { Fail("--no-model needs --anim (nothing to export)"); yield break; }
 
         // --- PMX (+ textures) --- unless --no-model (reuse a previously exported model)
-        string pmxPath = Path.Combine(outDir, $"chr{charaId}_{costume}.pmx");
+        // --pmx-name / --vmd-name override the generated names; the extension is optional.
+        string pmxPath = Path.Combine(outDir, WithExtension(Opt("--pmx-name"), $"chr{charaId}_{costume}", ".pmx"));
         if (!noModel)
         {
             try { ModelExporter.ExportModel(container, pmxPath); }
@@ -175,7 +179,8 @@ public class CliExporter : MonoBehaviour
             Time.captureFramerate = prevCapture;
             Time.fixedDeltaTime = prevFixed;
             Unity.Jobs.LowLevel.Unsafe.JobsUtility.JobWorkerCount = prevWorkers;
-            string vmdPath = Path.Combine(outDir, $"{Path.GetFileNameWithoutExtension(pmxPath)}.vmd");
+            // Defaults to the model's stem so a model/motion pair stays matched.
+            string vmdPath = Path.Combine(outDir, WithExtension(Opt("--vmd-name"), Path.GetFileNameWithoutExtension(pmxPath), ".vmd"));
             try { rec.SaveVMD(Path.GetFileNameWithoutExtension(pmxPath), vmdPath); }
             catch (Exception ex) { Fail("VMD save threw: " + ex); yield break; }
             // Drop the recorder's transient first frame (a stale pose at capture start).
@@ -355,6 +360,17 @@ public class CliExporter : MonoBehaviour
             catch (Exception ex) { onError(ex); yield break; }
             yield return cur;
         }
+    }
+
+    // Pick an output filename: the caller's if given, else the generated fallback. The
+    // extension is optional ("model" and "model.pmx" both work). Any directory part is
+    // dropped so --out stays the only thing deciding where files land.
+    static string WithExtension(string name, string fallbackStem, string ext)
+    {
+        string file = string.IsNullOrWhiteSpace(name) ? fallbackStem : Path.GetFileName(name.Trim());
+        if (string.IsNullOrEmpty(file)) file = fallbackStem;
+        if (!file.EndsWith(ext, StringComparison.OrdinalIgnoreCase)) file += ext;
+        return file;
     }
 
     static void Fail(string msg) { Debug.LogError("CLI_EXPORT_FAIL: " + msg); Quit(1); }

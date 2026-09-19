@@ -7,6 +7,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"; REPO="$(cd "$HERE/.." && pwd)"
 
 DATA=""; CHARA=""; ANIM=""; OUT=""; REGION="jp"; COSTUME="00"; SECS=5; TILES=1; BLINK=""; NOMOUTH=""
+PMXNAME=""; VMDNAME=""
 while [ $# -gt 0 ]; do case "$1" in
   --data-path) DATA="$2"; shift 2;;
   --chara)     CHARA="$2"; shift 2;;
@@ -18,12 +19,15 @@ while [ $# -gt 0 ]; do case "$1" in
   --tiles)     TILES="$2"; shift 2;;
   --blink)     BLINK="--blink"; shift;;
   --no-mouth)  NOMOUTH="--no-mouth"; shift;;
+  --pmx-name)  PMXNAME="$2"; shift 2;;
+  --vmd-name)  VMDNAME="$2"; shift 2;;
   *) echo "unknown arg: $1"; exit 1;;
 esac; done
 
 if [ -z "$DATA" ] || [ -z "$CHARA" ] || [ -z "$ANIM" ] || [ -z "$OUT" ]; then
   echo "usage: $0 --data-path DIR --chara ID --anim NAME --out DIR \\"
-  echo "          [--region jp|global] [--costume 00] [--seconds 5] [--tiles N] [--blink] [--no-mouth]"
+  echo "          [--region jp|global] [--costume 00] [--seconds 5] [--tiles N] [--blink] [--no-mouth] \\"
+  echo "          [--pmx-name model.pmx] [--vmd-name running.vmd]"
   exit 1
 fi
 
@@ -51,16 +55,21 @@ done
 
 mkdir -p "$OUT" "$REPO/logs"; RAW="$OUT/.raw"; mkdir -p "$RAW"
 STEM="chr${CHARA}_${COSTUME}"
+# Output filenames. Defaults keep the historical chr<id>_<costume> naming; an explicit
+# name may omit the extension. These are passed to the player so it writes them directly.
+PMXFILE="${PMXNAME:-$STEM.pmx}"; case "$PMXFILE" in *.pmx) ;; *) PMXFILE="$PMXFILE.pmx";; esac
+VMDFILE="${VMDNAME:-${PMXFILE%.pmx}.vmd}"; case "$VMDFILE" in *.vmd) ;; *) VMDFILE="$VMDFILE.vmd";; esac
 echo "Recording ${SECS}s of $ANIM (chara $CHARA) ..."
 "$BIN" -batchmode --export --data-path "$DATA" --region "$REGION" \
   --chara "$CHARA" --costume "$COSTUME" --anim "$ANIM" --seconds "$SECS" \
+  --pmx-name "$PMXFILE" --vmd-name "$VMDFILE" \
   --out "$RAW" -logFile "$REPO/logs/export-anim.log"
 
-[ -f "$RAW/$STEM.vmd" ] || { echo "raw export failed; see logs/export-anim.log"; exit 1; }
-cp -f "$RAW/$STEM.pmx" "$OUT/$STEM.pmx"
+[ -f "$RAW/$VMDFILE" ] || { echo "raw export failed; see logs/export-anim.log"; exit 1; }
+cp -f "$RAW/$PMXFILE" "$OUT/$PMXFILE"
 [ -d "$RAW/Texture2D" ] && cp -Rf "$RAW/Texture2D" "$OUT/"
 
 echo "Building seamless loop ..."
-"$PY" "$HERE/loopify_vmd.py" "$RAW/$STEM.vmd" "$OUT/$STEM.vmd" --tiles "$TILES" $BLINK $NOMOUTH
+"$PY" "$HERE/loopify_vmd.py" "$RAW/$VMDFILE" "$OUT/$VMDFILE" --tiles "$TILES" $BLINK $NOMOUTH
 rm -rf "$RAW"
-echo "Done -> $OUT/$STEM.pmx + $OUT/$STEM.vmd"
+echo "Done -> $OUT/$PMXFILE + $OUT/$VMDFILE"
