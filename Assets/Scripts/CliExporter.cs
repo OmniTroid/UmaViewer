@@ -350,8 +350,23 @@ public class CliExporter : MonoBehaviour
         container.SetDynamicBoneEnable(true);   // ensure CySpring physics is running
         container.LoadAnimation(anim);
 
+        // --physics-fps <30|60>: step rate for the capture. CySpringController hardcodes its
+        // fps mode to 60 and never reads the config, so a 30fps capture tells the solver 60
+        // while stepping it at 1/30. Keep the two in agreement, and sample every other frame
+        // when stepping at 60 so the output stays a 30fps track either way.
+        // Default 60: that is what the game runs at, and CySpring's per-step constants make
+        // its output strongly rate-dependent -- stepping the same motion at 30 instead moves
+        // the tail bones by ~50 degrees on average.
+        int.TryParse(Opt("--physics-fps", "60"), out int physFps);
+        if (physFps != 60) physFps = 30;
+        int stride = physFps / 30;
+
         int prevCapture = Time.captureFramerate; float prevFixed = Time.fixedDeltaTime;
-        Time.captureFramerate = 30; Time.fixedDeltaTime = 1f / 30f;
+        Time.captureFramerate = physFps; Time.fixedDeltaTime = 1f / physFps;
+        var ctrl = container.GetComponentInChildren<Gallop.CySpringController>(true);
+        bool prevMode = ctrl != null && ctrl.Is60FpsMode;
+        if (ctrl != null) ctrl.Is60FpsMode = (physFps == 60);
+        Debug.Log($"CLI_EXPORT: physics-ref stepping at {physFps}fps, solver 60fps-mode={(ctrl != null ? ctrl.Is60FpsMode.ToString() : "n/a")}");
 
         float warm = 0f, warmTarget = Mathf.Max(1.5f, len * 2f);
         while (warm < warmTarget) { warm += Time.deltaTime; yield return null; }
@@ -367,7 +382,7 @@ public class CliExporter : MonoBehaviour
         {
             // Next Update: bones hold the previous frame's LateUpdate (CySpring) result.
             // (WaitForEndOfFrame never fires in batchmode, so it can't be used here.)
-            yield return null;
+            for (int s2 = 0; s2 < stride; s2++) yield return null;
             if (f > 0) sb.Append(",");
             sb.Append("[");
             for (int i = 0; i < sp.Count; i++)
@@ -381,6 +396,7 @@ public class CliExporter : MonoBehaviour
         }
         sb.Append("]}");
         Time.captureFramerate = prevCapture; Time.fixedDeltaTime = prevFixed;
+        if (ctrl != null) ctrl.Is60FpsMode = prevMode;
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath)));
         File.WriteAllText(outPath, sb.ToString());
         Debug.Log($"CLI_EXPORT: wrote physics ref ({sp.Count} bones x {nframes} frames) " + outPath);

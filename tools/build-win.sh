@@ -35,9 +35,18 @@ echo "Building Build/Windows/UmaViewer.exe  (log: $LOG)"
 if grep -q "BUILD_OK" "$LOG"; then
   echo "OK -> $REPO/Build/Windows/UmaViewer.exe"
 else
-  echo "BUILD FAILED. Tail of log:"; tail -30 "$LOG"
-  if grep -qiE "no.*module|StandaloneWindows64|windows.*support|BuildTarget is not supported" "$LOG"; then
-    echo "-> Install 'Windows Build Support (Mono)' for $VER in Unity Hub, then retry."
+  echo "BUILD FAILED."
+  # Compile errors first: they are the usual cause and the log tail rarely shows them.
+  if grep -q "error CS" "$LOG"; then
+    echo "-> Compile errors:"; grep -m 20 "error CS" "$LOG" | sed 's/^/   /'
+  else
+    echo "Tail of log:"; tail -30 "$LOG"
+    # Only a genuinely missing module, not any line that happens to name the build target --
+    # "StandaloneWindows64" appears throughout a normal log, so matching it alone sent a
+    # compile failure to the wrong conclusion.
+    if grep -qiE "module is not installed|BuildTarget is not supported|no .* module (is )?(installed|found)" "$LOG"; then
+      echo "-> Install 'Windows Build Support (Mono)' for $VER in Unity Hub, then retry."
+    fi
   fi
   exit 1
 fi
