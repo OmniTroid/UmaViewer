@@ -98,7 +98,11 @@ namespace LibMMD.Writer
                 writer.Write((byte)rigidBody.Shape); // Shape
                 MMDReaderWriteUtil.WriteRawCoordinateVector3(writer, rigidBody.Dimemsions); // Dimemsions
                 MMDReaderWriteUtil.WriteVector3(writer, rigidBody.Position); // Position
-                MMDReaderWriteUtil.WriteAmpVector3(writer, rigidBody.Rotation, Mathf.Deg2Rad); // Rotation
+                // Rotation is held in degrees in memory (the reader multiplies by Rad2Deg) and PMX
+                // stores radians. WriteAmpVector3 divides by the amp, so the divisor is Rad2Deg --
+                // same as the joint rotation above. Deg2Rad here multiplied by 57.3 instead, which
+                // left every capsule collider with an arbitrary orientation.
+                MMDReaderWriteUtil.WriteAmpVector3(writer, rigidBody.Rotation, Mathf.Rad2Deg); // Rotation
                 writer.Write(rigidBody.Mass); // Mass
                 writer.Write(rigidBody.TranslateDamp); // TranslateDamp
                 writer.Write(rigidBody.RotateDamp); // RotateDamp
