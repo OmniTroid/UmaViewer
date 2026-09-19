@@ -600,6 +600,13 @@ public class ModelExporter
         int leftThighIndex = -1;
         int rightThighIndex = -1;
 
+        // CySpring bone names overflow the VMD's 15-byte track-name field, so a baked motion
+        // could not address them. Shorten the PMX primary name for those bones only; NameEn
+        // below keeps the original. Built over the whole list so the result is unique.
+        var boneNameList = new List<string>(bonelist.Count);
+        foreach (var b in bonelist) boneNameList.Add(b.name);
+        var springShortNames = SpringBoneNames.BuildMap(boneNameList);
+
         for (int i = 0; i < bonelist.Count; i++)
         {
             var bone = bonelist[i];
@@ -610,6 +617,11 @@ public class ModelExporter
             {
                 pmxbone.Name = mappedName;        // 日文名（MMD主名称）
                 pmxbone.NameEn = bone.name;       // 英文名（保留原始名称）
+            }
+            else if (springShortNames.TryGetValue(bone.name, out string shortName))
+            {
+                pmxbone.Name = shortName;         // fits a VMD track name
+                pmxbone.NameEn = bone.name;       // full CySpring name, for lookups and PMXEditor
             }
             else
             {
