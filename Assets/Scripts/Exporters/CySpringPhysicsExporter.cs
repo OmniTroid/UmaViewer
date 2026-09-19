@@ -19,7 +19,15 @@ public static class CySpringPhysicsExporter
     const ushort CLOTH_MASK = 0x0001; // collide with group 0 (body colliders) only, not self
     const ushort BODY_MASK = 0xFFFE;  // collide with every group except 0 (other body colliders)
 
-    struct P { public float drag, radius; public bool limited; public Vector3 lmax; }
+    // drag/stiff are held in the native solver's own scale, not the raw asset values.
+    // CySpringPlugin.cpp divides StiffnessForce by 100 and DragForce by 1000 (constants
+    // recovered from the DLL's .rdata), so the raw fields run 130..700 and 200..1050.
+    struct P { public float drag, stiff, radius; public bool limited; public Vector3 lmax; }
+
+    // CySpring's per-step stiffness (1.3..7.0 here) and a PMX/Bullet angular spring constant
+    // are different quantities, so only the ratio between bones carries over. This factor sets
+    // the absolute level; it is a calibration, chosen to straddle the flat 20 used before.
+    const float SPRING_SCALE = 5f;
 
     public static void Build(UmaContainerCharacter container, RawMMDModel model)
     {
@@ -49,12 +57,12 @@ public static class CySpringPhysicsExporter
             {
                 if (e == null || string.IsNullOrEmpty(e.BoneName)) continue;
                 roots.Add(e.BoneName);
-                param[e.BoneName] = new P { drag = e.DragForce, radius = e.CollisionRadius, limited = e._isLimit, lmax = e._limitAngleMax };
+                param[e.BoneName] = new P { drag = e.DragForce / 1000f, stiff = e.StiffnessForce / 100f, radius = e.CollisionRadius, limited = e._isLimit, lmax = e._limitAngleMax };
                 if (e._childElements == null) continue;
                 foreach (var ce in e._childElements)
                 {
                     if (ce == null || string.IsNullOrEmpty(ce.Name)) continue;
-                    param[ce.Name] = new P { drag = ce.DragForce, radius = ce.CollisionRadius, limited = ce.IsLimit, lmax = ce.LimitAngleMax };
+                    param[ce.Name] = new P { drag = ce.DragForce / 1000f, stiff = ce.StiffnessForce / 100f, radius = ce.CollisionRadius, limited = ce.IsLimit, lmax = ce.LimitAngleMax };
                 }
             }
         }
@@ -81,7 +89,7 @@ public static class CySpringPhysicsExporter
             {
                 int b = stack.Pop();
                 if (rootSet.Contains(b)) continue;
-                P p = param.TryGetValue(model.Bones[b].NameEn, out var pp) ? pp : new P { drag = 0.05f, radius = 0.02f, limited = false };
+                P p = param.TryGetValue(model.Bones[b].NameEn, out var pp) ? pp : new P { drag = 0.4f, stiff = 3f, radius = 0.02f, limited = false };
                 bodyOf[b] = AddBody(bodies, model, b, false, p);
                 int par = model.Bones[b].ParentIndex;
                 if (bodyOf.TryGetValue(par, out int pbody)) joints.Add(MakeJoint(model, b, pbody, bodyOf[b], p));
@@ -159,12 +167,23 @@ public static class CySpringPhysicsExporter
         // when a fast run yanks the kinematic anchors).
         var body = NewBody(model.Bones[bone].NameEn, bone, CLOTH_GROUP, CLOTH_MASK,
             anchor ? RigidBodyType.RigidTypeKinematic : RigidBodyType.RigidTypePhysics,
-            anchor ? 0.99f : Mathf.Clamp(0.9f + p.drag, 0.9f, 0.995f), anchor ? 0f : 1f);
+            anchor ? 0.99f : BulletDamping(p.drag), anchor ? 0f : 1f);
         body.Shape = RigidBodyShape.RigidShapeSphere;
         body.Dimemsions = new Vector3(r, 0, 0);
         body.Position = model.Bones[bone].Position;
         bodies.Add(body);
         return bodies.Count - 1;
+    }
+
+    // CySpring keeps (1 - drag) of the velocity per 30fps step; Bullet's damping is a
+    // per-second rate applied as pow(1 - damping, dt). Matching one second of decay gives
+    // 1 - (1 - drag)^30. Every drag in the data (0.20..1.05) lands at 0.9988 or above, so
+    // this saturates the ceiling for all but the very lightest chains -- the uniform result
+    // is the honest answer here, not lost detail.
+    static float BulletDamping(float drag)
+    {
+        float kept = Mathf.Clamp01(1f - drag);
+        return Mathf.Clamp(1f - Mathf.Pow(kept, 30f), 0.9f, 0.995f);
     }
 
     static MMDRigidBody NewBody(string name, int bone, int group, ushort mask, RigidBodyType type, float damp, float mass)
@@ -189,7 +208,13 @@ public static class CySpringPhysicsExporter
         bool jiggle = name.Contains("Bust") || name.Contains("Ch_Acc");
         float degLimit = jiggle ? 8f : (p.limited ? Mathf.Max(1f, Mathf.Min(Mathf.Abs(p.lmax.x), Mathf.Min(Mathf.Abs(p.lmax.y), Mathf.Abs(p.lmax.z)))) : 40f);
         float rad = Mathf.Min(degLimit, 90f) * Mathf.Deg2Rad;
-        var spring = jiggle ? new Vector3(20f, 20f, 20f) : Vector3.zero;
+        // Stiffness is CySpring's main restoring term -- it pulls each bone back toward its
+        // rest direction every step, and it varies 5.4x across this model. Cloth previously
+        // got no spring at all because springs were seen to oscillate, but at that time the
+        // writer negated x and z, so they were emitted as (-20, 20, -20): a negative constant
+        // pushes away from rest and diverges. With that fixed, carry the real per-bone value.
+        float k = Mathf.Max(0f, p.stiff) * SPRING_SCALE;
+        var spring = new Vector3(k, k, k);
         return new MMDJoint
         {
             Name = name, NameEn = name,

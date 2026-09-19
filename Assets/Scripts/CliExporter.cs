@@ -104,6 +104,42 @@ public class CliExporter : MonoBehaviour
         // --physics-ref <file.json>: record the CySpring-simulated Sp_* bone rotations per
         // frame (physics ON) to JSON, for comparing/calibrating against the exported PMX
         // physics or baking the exact motion. Run on Windows for the real CySpring.dll.
+        // --spring-dump <file.json>: write the raw CySpring per-bone parameters. The native
+        // solver scales them (StiffnessForce/100, DragForce/1000, Gravity/10000 -- see
+        // native/CySpring/CySpringPlugin.cpp), so the raw ranges decide how they map onto PMX.
+        string dumpPath = Opt("--spring-dump");
+        if (!string.IsNullOrEmpty(dumpPath))
+        {
+            var sbp = new StringBuilder();
+            var ciD = CultureInfo.InvariantCulture;
+            sbp.Append("[");
+            bool first = true;
+            foreach (var c in container.cySpringDataContainers)
+            {
+                if (c == null || c.springParam == null) continue;
+                foreach (var e in c.springParam)
+                {
+                    if (e == null || string.IsNullOrEmpty(e.BoneName)) continue;
+                    if (!first) sbp.Append(",");
+                    first = false;
+                    sbp.AppendFormat(ciD, "{{\"n\":\"{0}\",\"root\":1,\"stiff\":{1},\"drag\":{2},\"grav\":{3},\"rad\":{4},\"lim\":{5}}}",
+                        e.BoneName, e.StiffnessForce, e.DragForce, e.Gravity, e.CollisionRadius, e._isLimit ? 1 : 0);
+                    if (e._childElements == null) continue;
+                    foreach (var ce in e._childElements)
+                    {
+                        if (ce == null || string.IsNullOrEmpty(ce.Name)) continue;
+                        sbp.AppendFormat(ciD, ",{{\"n\":\"{0}\",\"root\":0,\"stiff\":{1},\"drag\":{2},\"grav\":{3},\"rad\":{4},\"lim\":{5}}}",
+                            ce.Name, ce.StiffnessForce, ce.DragForce, ce.Gravity, ce.CollisionRadius, ce.IsLimit ? 1 : 0);
+                    }
+                }
+            }
+            sbp.Append("]");
+            try { File.WriteAllText(dumpPath, sbp.ToString()); }
+            catch (Exception ex) { Fail("spring-dump threw: " + ex); yield break; }
+            Debug.Log("CLI_EXPORT: wrote spring dump " + dumpPath);
+            Quit(0); yield break;
+        }
+
         string physRefPath = Opt("--physics-ref");
         if (!string.IsNullOrEmpty(physRefPath))
         {
