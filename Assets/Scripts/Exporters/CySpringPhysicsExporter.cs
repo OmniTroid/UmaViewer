@@ -14,8 +14,10 @@ public static class CySpringPhysicsExporter
 {
     const int BODY_GROUP = 0;         // static body colliders (legs/torso)
     const int CLOTH_GROUP = 1;        // dynamic skirt/hair/tail
-    const ushort CLOTH_MASK = 0xFFFE; // collide with group 0 only (not self)
-    const ushort BODY_MASK = 0x0001;  // collide with everything except group 0
+    // A set bit means "collide with that group" (hence 0xFFFF = collide with everything, the
+    // usual PMX default). Bullet needs it from both sides: (groupA & maskB) && (groupB & maskA).
+    const ushort CLOTH_MASK = 0x0001; // collide with group 0 (body colliders) only, not self
+    const ushort BODY_MASK = 0xFFFE;  // collide with every group except 0 (other body colliders)
 
     struct P { public float drag, radius; public bool limited; public Vector3 lmax; }
 
