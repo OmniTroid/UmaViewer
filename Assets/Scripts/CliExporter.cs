@@ -3,6 +3,8 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
+using System.Globalization;
 using UnityEngine;
 
 // Headless export mode: reuses the in-app exporters to write a PMX (+textures) and
@@ -90,6 +92,18 @@ public class CliExporter : MonoBehaviour
         var container = UmaViewerBuilder.Instance.CurrentUMAContainer;
         if (container == null) { Fail("character build produced no container"); yield break; }
         yield return null;
+
+        // --physics-ref <file.json>: record the CySpring-simulated Sp_* bone rotations per
+        // frame (physics ON) to JSON, for comparing/calibrating against the exported PMX
+        // physics or baking the exact motion. Run on Windows for the real CySpring.dll.
+        string physRefPath = Opt("--physics-ref");
+        if (!string.IsNullOrEmpty(physRefPath))
+        {
+            yield return RunSafe(RecordPhysicsRef(container, main, animId, physRefPath), e => buildErr = e);
+            if (buildErr != null) { Fail("physics-ref threw: " + buildErr); yield break; }
+            Debug.Log("CLI_EXPORT_DONE " + physRefPath);
+            Quit(0); yield break;
+        }
 
         if (noModel && string.IsNullOrEmpty(animId)) { Fail("--no-model needs --anim (nothing to export)"); yield break; }
 
@@ -275,6 +289,55 @@ public class CliExporter : MonoBehaviour
         Array.Copy(BitConverter.GetBytes((uint)frame), 0, r, 15, 4);
         Array.Copy(BitConverter.GetBytes(weight), 0, r, 19, 4);
         return r;
+    }
+
+    // Record CySpring-simulated Sp_* bone local rotations per frame to JSON. Captures at
+    // end-of-frame (after the container's LateUpdate runs CySpring), at a fixed 1/30 step.
+    static IEnumerator RecordPhysicsRef(UmaContainerCharacter container, UmaViewerMain main, string animId, string outPath)
+    {
+        if (string.IsNullOrEmpty(animId)) { Debug.LogError("CLI_EXPORT_FAIL: --physics-ref needs --anim"); yield break; }
+        var anim = main.AbMotions.FirstOrDefault(e => e.Name == animId) ?? main.AbMotions.FirstOrDefault(e => e.Name.Contains(animId));
+        if (anim == null) { Debug.LogError("CLI_EXPORT_FAIL: animation not found: " + animId); yield break; }
+        AnimationClip clip = null; try { clip = anim.Get<AnimationClip>(); } catch { }
+        float len = (clip != null && clip.length > 0.01f) ? clip.length : 5f;
+
+        container.SetDynamicBoneEnable(true);   // ensure CySpring physics is running
+        container.LoadAnimation(anim);
+
+        int prevCapture = Time.captureFramerate; float prevFixed = Time.fixedDeltaTime;
+        Time.captureFramerate = 30; Time.fixedDeltaTime = 1f / 30f;
+
+        float warm = 0f, warmTarget = Mathf.Max(1.5f, len * 2f);
+        while (warm < warmTarget) { warm += Time.deltaTime; yield return null; }
+
+        var sp = container.GetComponentsInChildren<Transform>(true).Where(t => t.name.StartsWith("Sp_")).ToList();
+        int nframes = Mathf.Max(1, Mathf.RoundToInt(len * 30f));
+        var ci = CultureInfo.InvariantCulture;
+        var sb = new StringBuilder();
+        sb.Append("{\"fps\":30,\"frames\":").Append(nframes).Append(",\"bones\":[");
+        sb.Append(string.Join(",", sp.Select(t => "\"" + t.name + "\"")));
+        sb.Append("],\"rot\":[");
+        for (int f = 0; f < nframes; f++)
+        {
+            // Next Update: bones hold the previous frame's LateUpdate (CySpring) result.
+            // (WaitForEndOfFrame never fires in batchmode, so it can't be used here.)
+            yield return null;
+            if (f > 0) sb.Append(",");
+            sb.Append("[");
+            for (int i = 0; i < sp.Count; i++)
+            {
+                var q = sp[i].localRotation;
+                if (i > 0) sb.Append(",");
+                sb.Append("[").Append(q.x.ToString(ci)).Append(",").Append(q.y.ToString(ci)).Append(",")
+                  .Append(q.z.ToString(ci)).Append(",").Append(q.w.ToString(ci)).Append("]");
+            }
+            sb.Append("]");
+        }
+        sb.Append("]}");
+        Time.captureFramerate = prevCapture; Time.fixedDeltaTime = prevFixed;
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath)));
+        File.WriteAllText(outPath, sb.ToString());
+        Debug.Log($"CLI_EXPORT: wrote physics ref ({sp.Count} bones x {nframes} frames) " + outPath);
     }
 
     // Run a coroutine to completion, capturing any exception (so we can fail cleanly).

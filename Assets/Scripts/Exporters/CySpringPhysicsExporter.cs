@@ -150,9 +150,11 @@ public static class CySpringPhysicsExporter
     static int AddBody(List<MMDRigidBody> bodies, RawMMDModel model, int bone, bool anchor, P p)
     {
         float r = anchor ? 0.02f : Mathf.Clamp(p.radius, 0.015f, 0.1f);
+        // High damping keeps the pendulum chain calm (underdamped chains jitter, especially
+        // when a fast run yanks the kinematic anchors).
         var body = NewBody(model.Bones[bone].NameEn, bone, CLOTH_GROUP, CLOTH_MASK,
             anchor ? RigidBodyType.RigidTypeKinematic : RigidBodyType.RigidTypePhysics,
-            anchor ? 0.9f : Mathf.Clamp01(0.6f + p.drag), anchor ? 0f : 1f);
+            anchor ? 0.99f : Mathf.Clamp(0.9f + p.drag, 0.9f, 0.995f), anchor ? 0f : 1f);
         body.Shape = RigidBodyShape.RigidShapeSphere;
         body.Dimemsions = new Vector3(r, 0, 0);
         body.Position = model.Bones[bone].Position;
@@ -183,7 +185,9 @@ public static class CySpringPhysicsExporter
             Position = model.Bones[bone].Position, Rotation = Vector3.zero,
             PositionLowLimit = Vector3.zero, PositionHiLimit = Vector3.zero,
             RotationLowLimit = new Vector3(-rad, -rad, -rad), RotationHiLimit = new Vector3(rad, rad, rad),
-            SpringTranslate = Vector3.zero, SpringRotate = new Vector3(20f, 20f, 20f),
+            // No rotational spring: rotation limits + high body damping keep the chain stable.
+            // A stiff spring here fights the limits and oscillates (jitter).
+            SpringTranslate = Vector3.zero, SpringRotate = Vector3.zero,
         };
     }
 
