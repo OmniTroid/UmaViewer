@@ -93,7 +93,7 @@ namespace LibMMD.Writer
                 MMDReaderWriteUtil.WriteSizedString(writer, rigidBody.Name, pmxConfig.Encoding); // Name
                 MMDReaderWriteUtil.WriteSizedString(writer, rigidBody.NameEn, pmxConfig.Encoding); // NameEn
                 MMDReaderWriteUtil.WriteIndex(writer, rigidBody.AssociatedBoneIndex, pmxConfig.BoneIndexSize); // AssociatedBoneIndex
-                writer.Write(rigidBody.CollisionGroup); // CollisionGroup
+                writer.Write((byte)rigidBody.CollisionGroup); // CollisionGroup (1 byte; reader uses ReadByte)
                 writer.Write(rigidBody.CollisionMask); // CollisionMask
                 writer.Write((byte)rigidBody.Shape); // Shape
                 MMDReaderWriteUtil.WriteRawCoordinateVector3(writer, rigidBody.Dimemsions); // Dimemsions

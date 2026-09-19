@@ -167,6 +167,15 @@ public class ModelExporter
 
         ReorderLowerBody(model);
 
+        // Skirt/hair/tail physics: convert CySpring spring bones into PMX rigid bodies +
+        // joints so a runtime (babylon-mmd) can simulate them. Runs after the reorder so
+        // bone indices are final. Character containers only (props have no CySpring).
+        if (container is UmaContainerCharacter physChara)
+        {
+            try { CySpringPhysicsExporter.Build(physChara, model); }
+            catch (System.Exception ex) { Debug.LogWarning("CySpring physics export skipped: " + ex); }
+        }
+
         return model;
     }
 

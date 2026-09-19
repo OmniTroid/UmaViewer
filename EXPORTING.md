@@ -70,5 +70,6 @@ It records `--seconds` of raw motion, runs `tools/loopify_vmd.py` (full-body res
 ## Notes for babylon-mmd
 
 - Bone and morph names are MMD-standard Japanese (`センター`, `右足`, `あ`, `まばたき`, …); the PMX also stores the game bone name as each bone's English name.
-- The VMD carries **no camera** data (model motion only).
+- Skirt/hair/ear/tail physics is exported as **PMX rigid bodies + joints** derived from the game's CySpring spring bones (kinematic colliders on the body/legs, dynamic bodies on the swaying bones, joints along each chain). Enable babylon-mmd's physics runtime so it simulates them; otherwise those bones stay static and the skirt clips. It's a CySpring→MMD approximation (different solver), so mass/damping/stiffness/collider sizes are heuristic and tunable, not an exact match.
+- The VMD carries **no camera** data (model motion only), and no physics-bone tracks (physics is simulated at runtime from the PMX bodies, not baked).
 - Facial morphs are a separate channel: a motion with a paired `_face` asset records real expressions; otherwise the mouth stays neutral. With `--no-mouth`, drive the vowel morphs (`あいうえお`) yourself at runtime.
