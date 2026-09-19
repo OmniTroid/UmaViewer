@@ -78,10 +78,19 @@ namespace LibMMD.Writer
                 MMDReaderWriteUtil.WriteAmpVector3(writer, joint.Rotation, Mathf.Rad2Deg);
                 MMDReaderWriteUtil.WriteVector3(writer, joint.PositionLowLimit);
                 MMDReaderWriteUtil.WriteVector3(writer, joint.PositionHiLimit);
-                MMDReaderWriteUtil.WriteVector3(writer, joint.RotationLowLimit, false);
-                MMDReaderWriteUtil.WriteVector3(writer, joint.RotationHiLimit, false);
-                MMDReaderWriteUtil.WriteVector3(writer, joint.SpringTranslate);
-                MMDReaderWriteUtil.WriteVector3(writer, joint.SpringRotate, false);
+                // Angular limits follow the handedness flip, which negates x and z -- and
+                // negating an interval maps [lo, hi] to [-hi, -lo], so the two bounds must be
+                // swapped as well. Emitting them in place left lo > hi on x and z, and Bullet
+                // reads that as "no limit" (btRotationalLimitMotor::isLimited() is !(lo > hi)),
+                // so those axes span freely instead of being constrained.
+                var rotLo = joint.RotationLowLimit;
+                var rotHi = joint.RotationHiLimit;
+                MMDReaderWriteUtil.WritePlainVector3(writer, new Vector3(-rotHi.x, rotLo.y, -rotHi.z));
+                MMDReaderWriteUtil.WritePlainVector3(writer, new Vector3(-rotLo.x, rotHi.y, -rotLo.z));
+                // Spring stiffness is a magnitude, not a direction: it takes no flip and no
+                // size scaling. A negated constant is an anti-restoring force that diverges.
+                MMDReaderWriteUtil.WritePlainVector3(writer, joint.SpringTranslate);
+                MMDReaderWriteUtil.WritePlainVector3(writer, joint.SpringRotate);
             }
         }
 
