@@ -140,9 +140,15 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
     float aposeDegress = 38.5f;
 
     public bool IsLive;
+
+    /// Physics step applied by Initialize(). Defaults to the 1/30 this recorder has always
+    /// used; a caller stepping the simulation faster than the recorded frame rate sets it
+    /// before Initialize(), which would otherwise silently reset the rate it just chose.
+    public float FixedStep = FPSs;
+
     public void Initialize()
     {
-        Time.fixedDeltaTime = FPSs;
+        Time.fixedDeltaTime = FixedStep;
         container = GetComponentInParent<UmaContainer>();
         List<Transform> objs = GetComponentsInChildren<Transform>().ToList();
         BoneDictionary = new Dictionary<BoneNames, Transform>()
@@ -268,6 +274,13 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
     /// run at the rate the game uses (60), while a VMD frame is 1/30s. Stride 2 satisfies both.
     public int CaptureStride = 1;
     int strideTick;
+
+    /// Keep one recorded frame in every N when writing, renumbering so the output is still a
+    /// 30fps track. This is how a simulation stepped faster than 30fps reaches the file: record
+    /// every step, then drop the in-between ones at write time. Downsampling here rather than
+    /// while recording keeps TrimLoop and loopify_vmd.py looking at 30fps frame numbers, which
+    /// is what a VMD frame number means.
+    public int WriteStride = 1;
 
     private void FixedUpdate()
     {
@@ -604,9 +617,11 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
                 {
                     for (int i = 0; i < frameNumberSaved; i++)
                     {
+                        if (WriteStride > 1 && (i % WriteStride) != 0) { continue; }
+                        int j = i / WriteStride;
                         foreach (BoneNames boneName in Enum.GetValues(typeof(BoneNames)))
                         {
-                            if ((i % KeyReductionLevel) != 0 && boneName != BoneNames.全ての親) { continue; }
+                            if ((j % KeyReductionLevel) != 0 && boneName != BoneNames.全ての親) { continue; }
                             if (!BoneDictionary.Keys.Contains(boneName)) { continue; }
                             if (BoneDictionary[boneName] == null) { continue; }
                             if (!UseParentOfAll && boneName == BoneNames.全ての親) { continue; }
@@ -623,6 +638,7 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
                 {
                     for (int i = 0; i < frameNumberSaved; i++)
                     {
+                        if (WriteStride > 1 && (i % WriteStride) != 0) { continue; }
                         for (int e = 0; e < extraBones.Count; e++)
                         {
                             string n = extraBones[e].Name;
@@ -668,7 +684,7 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
                     binaryWriter.Write(boneNameBytes, 0, boneNameBytes.Length);
                     binaryWriter.Write(new byte[boneNameLength - boneNameBytes.Length], 0, boneNameLength - boneNameBytes.Length);
 
-                    byte[] frameNumberByte = BitConverter.GetBytes((uint)i);
+                    byte[] frameNumberByte = BitConverter.GetBytes((uint)(i / WriteStride));
                     binaryWriter.Write(frameNumberByte, 0, intByteLength);
 
                     Vector3 position = positionDictionarySaved[boneName][i];
@@ -708,7 +724,7 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
                     binaryWriter.Write(nameBytes, 0, nameBytes.Length);
                     binaryWriter.Write(new byte[boneNameLength - nameBytes.Length], 0, boneNameLength - nameBytes.Length);
 
-                    binaryWriter.Write(BitConverter.GetBytes((uint)i), 0, intByteLength);
+                    binaryWriter.Write(BitConverter.GetBytes((uint)(i / WriteStride)), 0, intByteLength);
 
                     // Rotation only: no translation on a spring bone.
                     binaryWriter.Write(BitConverter.GetBytes(0f), 0, intByteLength);

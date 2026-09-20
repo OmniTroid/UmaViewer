@@ -212,15 +212,20 @@ public class CliExporter : MonoBehaviour
             int prevCapture = Time.captureFramerate;
             float prevFixed = Time.fixedDeltaTime;
             int prevWorkers = Unity.Jobs.LowLevel.Unsafe.JobsUtility.JobWorkerCount;
-            // Recording runs at 30, which is both the animation sampling rate and what a VMD
-            // frame number means. Stepping the physics at 60 here is NOT simply a matter of
-            // shortening fixedDeltaTime: under Time.captureFramerate Unity runs one
-            // FixedUpdate per rendered frame whatever fixedDeltaTime says, so SaveFrame's
-            // rate and the physics rate cannot be separated from inside this loop. Baked
-            // spring motion is therefore captured at a 30fps step, which is not what the game
-            // runs -- see --physics-fps on RecordPhysicsRef for the measured difference.
-            Time.captureFramerate = 30;
-            Time.fixedDeltaTime = 1f / 30f;
+            // CySpring's constants are per-step, so its output depends strongly on the rate
+            // it is stepped at: the same run baked at 30 instead of the game's 60 moves the
+            // tail bones ~46 deg on average. Render at that rate so FixedUpdate, and with it
+            // SaveFrame and the simulation, run at it too, then drop the extra frames when
+            // writing (WriteStride) so the file is still a 30fps track. Note the recorder's
+            // Initialize() assigns Time.fixedDeltaTime itself, so rec.FixedStep has to carry
+            // the rate rather than setting Time.fixedDeltaTime before it.
+            int.TryParse(Opt("--physics-fps", "60"), out int recFps);
+            if (recFps != 60) recFps = 30;
+            Time.captureFramerate = recFps;
+            Time.fixedDeltaTime = 1f / recFps;
+            var springCtrl = container.GetComponentInChildren<Gallop.CySpringController>(true);
+            bool prevSpringMode = springCtrl != null && springCtrl.Is60FpsMode;
+            if (springCtrl != null) springCtrl.Is60FpsMode = (recFps == 60);
             Unity.Jobs.LowLevel.Unsafe.JobsUtility.JobWorkerCount = 0;
 
             // For a loop, let the crossfade finish and the motion settle so frame 0
@@ -246,7 +251,10 @@ public class CliExporter : MonoBehaviour
 
             var rootbone = container.transform.Find("Position");
             var rec = rootbone.gameObject.AddComponent<UnityHumanoidVMDRecorder>();
+            rec.FixedStep = 1f / recFps;     // Initialize() applies it; it hardcodes 1/30 otherwise
             rec.Initialize();
+            rec.WriteStride = recFps / 30;   // 60fps steps -> one 30fps VMD frame per two
+            Debug.Log($"CLI_EXPORT: stepping physics at {recFps}fps, writing every {rec.WriteStride} frame(s)");
             if (bakePhysics)
             {
                 // Short names so each track fits the VMD's 15-byte field and matches the PMX
@@ -267,6 +275,7 @@ public class CliExporter : MonoBehaviour
             rec.StopRecording();
             Time.captureFramerate = prevCapture;
             Time.fixedDeltaTime = prevFixed;
+            if (springCtrl != null) springCtrl.Is60FpsMode = prevSpringMode;
             Unity.Jobs.LowLevel.Unsafe.JobsUtility.JobWorkerCount = prevWorkers;
             // Defaults to the model's stem so a model/motion pair stays matched.
             string vmdPath = Path.Combine(outDir, WithExtension(Opt("--vmd-name"), Path.GetFileNameWithoutExtension(pmxPath), ".vmd"));
