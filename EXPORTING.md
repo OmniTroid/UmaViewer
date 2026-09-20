@@ -34,6 +34,13 @@ On Windows the only changes are the executable (`Build\Windows\UmaViewer.exe`) a
 | `--blink` | Bake a periodic eye-blink (`まばたき`) over the motion. |
 | `--no-mouth` | Strip the mouth vowel morphs (`あいうえお▲□`) so a viewer can drive lip-sync at runtime. |
 | `--seconds N` | Record N seconds raw (no loop trim) instead of one period; for `tools/loopify_vmd.py`. |
+| `--pmx-name F` | Output PMX filename (default `chr<id>_<costume>.pmx`). Extension optional. |
+| `--vmd-name F` | Output VMD filename (defaults to the PMX's stem). Extension optional. |
+| `--bake-physics` | Record the cloth simulation into the VMD instead of exporting PMX rigid bodies. See below. |
+| `--warmup N` | Settle N animation periods before capturing a loop (default 2). Diagnostic. |
+| `--physics-fps 30\|60` | Step rate for `--physics-ref` captures (default 60). Diagnostic. |
+| `--physics-ref F` | Write the CySpring-simulated spring-bone rotations per frame to JSON. Diagnostic. |
+| `--spring-dump F` | Write the raw per-bone CySpring parameters to JSON. Diagnostic. |
 
 ### Output
 
@@ -67,9 +74,60 @@ tools/export-anim.sh --data-path /path/to/Persistent --chara 1127 \
 
 It records `--seconds` of raw motion, runs `tools/loopify_vmd.py` (full-body resample → fundamental-period search → tail crossfade → optional blink/mouth-strip), and leaves the PMX + textures + a seamless VMD. Runs on macOS/Linux and Git Bash/WSL on Windows; set `UMAVIEWER_BIN` to point at a player elsewhere. `--tiles N` repeats the loop (e.g. a less frequent blink).
 
+The wrapper forwards `--pmx-name`, `--vmd-name` and `--bake-physics` to the player. `loopify_vmd.py` tiles every track it finds, so baked cloth survives the loop build; its `--seam-cloth` option also weighs those tracks when choosing the loop phase, which it otherwise picks from the humanoid bones alone.
+
+## Cloth: simulated or baked
+
+The game simulates cloth with **CySpring**, a Verlet spring-bone solver: each bone keeps an
+implicit velocity from its previous position, is pulled back toward its rest direction by a
+stiffness term, damped by a drag term, and then projected back onto a fixed distance from its
+parent every step. PMX physics is something else entirely — rigid bodies joined by 6DOF spring
+constraints, solved iteratively. There is no parameter mapping between the two, only a
+resemblance.
+
+**Simulated (default).** The PMX carries rigid bodies and joints built from the CySpring data:
+kinematic colliders on the body and legs, a dynamic body per swaying bone, joints along each
+chain with the per-bone stiffness mapped onto the joint spring. Enable babylon-mmd's physics
+runtime or those bones stay put and the skirt clips. The cloth reacts at runtime, and it is an
+approximation — expect it to move differently from the game.
+
+**Baked (`--bake-physics`).** The exporter runs CySpring itself, records the resulting
+spring-bone rotations as VMD tracks, and writes the PMX with no rigid bodies or joints at all.
+The cloth is then the solver's own output rather than a reconstruction of it. The cost is that
+the motion is fixed: it cannot react to anything at runtime, and every animation needs its own
+bake. For a fixed looping emote that is usually the right trade.
+
+Notes on the baked path:
+
+- Spring bones are renamed in the PMX so their names fit a VMD track's 15-byte field. The
+  originals (up to 20 characters, and colliding under truncation) are kept as each bone's
+  English name. `Sp_Hi_MSkirt0_FLL_00` becomes `HiMS0FLL0`.
+- Baked tracks keep every frame, ignoring the key reduction applied to body motion, because
+  cloth can move ~34 deg between frames and interpolating across that loses the detail.
+- The simulation is currently stepped at 30fps while the game runs at 60. CySpring's constants
+  are per-step so its output is rate-dependent: the same run captured at 30 instead of 60 moves
+  the tail bones ~50 deg on average. `--physics-fps` fixes this for `--physics-ref` captures but
+  not for the bake — see the comment in `CliExporter.cs` for why the recording loop cannot
+  currently separate the two rates.
+- A VMD frame number is the timestamp, at 30 ticks per second, with no frame-rate field. Writing
+  60 keys per second would halve the playback speed rather than add detail, so the VMD stays at
+  30fps whatever the simulation is stepped at.
+
+### Diagnostics
+
+`--physics-ref F` writes the CySpring-simulated spring-bone rotations per frame to JSON: the
+solver's own output, for comparing against whatever a runtime produces from the PMX bodies.
+`--spring-dump F` writes the raw per-bone CySpring parameters. Both need the real
+`CySpringPlugin.dll`, so run them on Windows.
+
+The native solver scales the raw asset values — `StiffnessForce/100`, `DragForce/1000`,
+`Gravity/10000` — with the constants recovered from the DLL in `native/CySpring/CySpringPlugin.cpp`.
+Read the raw fields without those divisors and the numbers are meaningless: on chr1127 they run
+130..700 and 200..1050.
+
 ## Notes for babylon-mmd
 
 - Bone and morph names are MMD-standard Japanese (`センター`, `右足`, `あ`, `まばたき`, …); the PMX also stores the game bone name as each bone's English name.
-- Skirt/hair/ear/tail physics is exported as **PMX rigid bodies + joints** derived from the game's CySpring spring bones (kinematic colliders on the body/legs, dynamic bodies on the swaying bones, joints along each chain). Enable babylon-mmd's physics runtime so it simulates them; otherwise those bones stay static and the skirt clips. It's a CySpring→MMD approximation (different solver), so mass/damping/stiffness/collider sizes are heuristic and tunable, not an exact match.
-- The VMD carries **no camera** data (model motion only), and no physics-bone tracks (physics is simulated at runtime from the PMX bodies, not baked).
+- Skirt/hair/ear/tail physics ships one of two ways, and they are mutually exclusive — see **Cloth: simulated or baked** below.
+- The VMD carries **no camera** data (model motion only).
 - Facial morphs are a separate channel: a motion with a paired `_face` asset records real expressions; otherwise the mouth stays neutral. With `--no-mouth`, drive the vowel morphs (`あいうえお`) yourself at runtime.
