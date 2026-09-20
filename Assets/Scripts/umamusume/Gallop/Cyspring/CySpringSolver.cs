@@ -225,11 +225,17 @@ namespace Gallop
             if (b.IsSkip != 0) return;
 
             // 1) Verlet movement delta, then shift history
-            // The drag term uses this RAW, unscaled. The .cpp halved it here at 30fps, but the
-            // plugin's frame-rate handling lives entirely in the integrate step below -- the
-            // force block at 0x180009bba..0x180009c49 runs before the rate branch at
-            // 0x180009c59, so it only ever sees Prev - Target as-is.
+            // Halved at 30fps, before anything else reads it -- so the drag term sees the halved
+            // value too. There are TWO frame-rate branches in the plugin and it is easy to find
+            // only the second: this one is at 0x1800097fd, immediately after the subtraction and
+            // well before the force block, and scales by the 0.5 at 0x18008ec10. The integrate's
+            // own branch at 0x180009c59 is separate and compounds with it.
+            //
+            // Between them the delta term comes out the same at either rate -- 30fps halves here
+            // and doubles there -- so dropping this one is invisible at 60fps and only shows up
+            // as a wholesale 30fps divergence, in Force as much as in position.
             Vector3 delta = b.PrevTargetPosition - b.TargetPosition;
+            if (!is60FPS) delta = delta * 0.5f;
             b.PrevTargetPosition = b.TargetPosition;
 
             // 2) Aim = BoneAxis rotated by (ParentRotation . InitLocalRotation).
