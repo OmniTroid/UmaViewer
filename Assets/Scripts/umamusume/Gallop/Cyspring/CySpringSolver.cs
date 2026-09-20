@@ -220,8 +220,11 @@ namespace Gallop
             float D = (springRate != 0f) ? springRate : 1f;
 
             // 1) Verlet movement delta, then shift history
+            // The drag term uses this RAW, unscaled. The .cpp halved it here at 30fps, but the
+            // plugin's frame-rate handling lives entirely in the integrate step below -- the
+            // force block at 0x180009bba..0x180009c49 runs before the rate branch at
+            // 0x180009c59, so it only ever sees Prev - Target as-is.
             Vector3 delta = b.PrevTargetPosition - b.TargetPosition;
-            if (!is60FPS) delta = delta * 0.5f;  // 30fps baseline
             b.PrevTargetPosition = b.TargetPosition;
 
             // 2) Aim = BoneAxis rotated by (ParentRotation . InitLocalRotation).
@@ -267,8 +270,37 @@ namespace Gallop
                 stiff * b.AimVector.y + drag * delta.y + windV * windY - grav + ef.y / FORCE_DIV,
                 stiff * b.AimVector.z + drag * delta.z + windH * windZ + ef.z / FORCE_DIV);
 
-            // 4) Integrate (Verlet)
-            Vector3 pos = b.TargetPosition - delta * timescale + b.Force;
+            // 4) Integrate (Verlet). Two branches on is60FPS at 0x180009c59, and a 30fps frame is
+            // simply a step of twice the length: the delta coefficient goes 1 -> 2 and the force
+            // coefficient 1.5 -> 3.0 (the doubles at 0x18008ec30 and 0x18008ec40). The .cpp had
+            // neither -- it scaled delta by 0.5 rather than 1 or 2, and added Force with no
+            // coefficient at all, leaving every integrated position short by a factor of 1.5*T.
+            //
+            // The accumulation is done in double and rounded once at the end, and the two
+            // branches do not even bracket it the same way: the 60fps path subtracts the delta
+            // term in float (subss at 0x180009c67) before widening, while the 30fps path widens
+            // first and does everything in double (0x180009ccc onwards). Reproduced as written,
+            // since the whole point here is to match the plugin bit for bit.
+            Vector3 pos;
+            if (is60FPS)
+            {
+                double td = timescale;
+                float fx = b.TargetPosition.x - delta.x * timescale;
+                float fy = b.TargetPosition.y - delta.y * timescale;
+                float fz = b.TargetPosition.z - delta.z * timescale;
+                pos = new Vector3(
+                    (float)(fx + (double)b.Force.x * 1.5 * td),
+                    (float)(fy + (double)b.Force.y * 1.5 * td),
+                    (float)(fz + (double)b.Force.z * 1.5 * td));
+            }
+            else
+            {
+                double td = timescale;
+                pos = new Vector3(
+                    (float)((double)b.TargetPosition.x - ((double)delta.x + delta.x) * td + (double)b.Force.x * 3.0 * td),
+                    (float)((double)b.TargetPosition.y - ((double)delta.y + delta.y) * td + (double)b.Force.y * 3.0 * td),
+                    (float)((double)b.TargetPosition.z - ((double)delta.z + delta.z) * td + (double)b.Force.z * 3.0 * td));
+            }
 
             // 5) Length constraint to InitBoneDistance about the parent anchor
             Vector3 anchor = b.SelfPosition;
