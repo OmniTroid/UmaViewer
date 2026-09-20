@@ -22,8 +22,23 @@ for c in \
 done
 [ -n "$UNITY" ] || { echo "Unity $VER not found (install via Unity Hub)"; exit 1; }
 
+# A build that dies (compile error, kill, crash) leaves Temp/UnityLockfile behind, and every
+# later build then refuses to start while blaming an editor that is not running. Only treat the
+# lock as real if a Unity process actually exists.
 if [ -e "$REPO/Temp/UnityLockfile" ]; then
-  echo "Project is open in the Unity Editor. Quit it first (the build needs the lock)."; exit 1
+  unity_running=""
+  if command -v tasklist >/dev/null 2>&1; then
+    tasklist //FI "IMAGENAME eq Unity.exe" 2>/dev/null | grep -qi "Unity.exe" && unity_running=1
+  elif command -v pgrep >/dev/null 2>&1; then
+    pgrep -x Unity >/dev/null 2>&1 && unity_running=1
+  else
+    unity_running=1   # cannot tell; assume the lock is real
+  fi
+  if [ -n "$unity_running" ]; then
+    echo "Project is open in the Unity Editor. Quit it first (the build needs the lock)."; exit 1
+  fi
+  echo "Removing stale Temp/UnityLockfile (no Unity process running)."
+  rm -f "$REPO/Temp/UnityLockfile"
 fi
 
 mkdir -p "$REPO/logs"

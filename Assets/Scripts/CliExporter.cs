@@ -146,6 +146,19 @@ public class CliExporter : MonoBehaviour
             Quit(0); yield break;
         }
 
+        // --list-anims <substring>: print the motion assets whose name contains the substring.
+        // Asset names are not guessable -- a character often has both a generic type00 motion
+        // and its own chr<id> variant, and picking the wrong one exports a different animation
+        // than the viewer shows.
+        string listPat = Opt("--list-anims");
+        if (!string.IsNullOrEmpty(listPat))
+        {
+            var hits = main.AbMotions.Where(e => e.Name.Contains(listPat)).Select(e => e.Name).OrderBy(n => n).ToList();
+            Debug.Log($"CLI_EXPORT: {hits.Count} motion(s) containing '{listPat}'");
+            foreach (var n in hits) Debug.Log("CLI_ANIM " + n);
+            Quit(0); yield break;
+        }
+
         string physRefPath = Opt("--physics-ref");
         if (!string.IsNullOrEmpty(physRefPath))
         {
@@ -192,6 +205,15 @@ public class CliExporter : MonoBehaviour
         {
             var anim = main.AbMotions.FirstOrDefault(e => e.Name == animId)
                     ?? main.AbMotions.FirstOrDefault(e => e.Name.Contains(animId));
+            if (anim != null && anim.Name != animId)
+            {
+                // A substring match is a guess. Say so loudly: it silently exports a different
+                // animation than the one asked for, which looks like a version mismatch later.
+                int alts = main.AbMotions.Count(e => e.Name.Contains(animId));
+                Debug.LogWarning($"CLI_EXPORT: '{animId}' is not an exact asset name; using '{anim.Name}'"
+                               + (alts > 1 ? $" -- {alts} assets match, see --list-anims" : ""));
+            }
+            if (anim != null) Debug.Log("CLI_EXPORT: motion asset = " + anim.Name);
             if (anim == null) { Fail($"animation '{animId}' not found"); yield break; }
 
             AnimationClip clip = null;
