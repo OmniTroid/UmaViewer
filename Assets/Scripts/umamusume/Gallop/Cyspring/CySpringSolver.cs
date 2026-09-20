@@ -96,9 +96,13 @@ namespace Gallop
             Quaternion q = Qmul(b.ParentRotation, b.InitLocalRotation);
             b.AimVector = Qrot(q, b.BoneAxis);
 
-            // 3) Forces (unit constants exact from .rdata)
-            float stiff = (b.StiffnessForce / 100f) * stiffnessForceRate / D;
-            float drag  = (b.DragForce / 1000f) * dragForceRate / D;
+            // 3) Forces. Divisors read out of the plugin, not guessed: NativeClothUpdate at
+            // 0x180009aed multiplies by StiffnessForce (0xc4) then divides by the float at
+            // 0x18008ec8c = 1000, and multiplies by DragForce (0xc8) then divides by the one at
+            // 0x18008ec80 = 100. The .cpp reconstruction had these two transposed, which made
+            // stiffness 10x too strong and drag 10x too weak on every bone.
+            float stiff = (b.StiffnessForce / 1000f) * stiffnessForceRate / D;
+            float drag  = (b.DragForce / 100f) * dragForceRate / D;
             float windH = b.HorizontalWindRateSlow + (b.HorizontalWindRateFast - b.HorizontalWindRateSlow) * windStrength;
             float windV = b.VerticalWindRateSlow + (b.VerticalWindRateFast - b.VerticalWindRateSlow) * windStrength;
             float grav  = (gravityRate * b.Gravity / 10000f) / D;
