@@ -12,7 +12,14 @@ namespace Gallop
         private const string DLL_NAME = "CySpringPlugin";
 #endif
 
-        public static bool isNative = true;
+        // When false, the managed CySpringSolver runs instead of the native plugin.
+        // WebGL has no native plugin, so default to managed there.
+        public static bool isNative =
+#if UNITY_WEBGL && !UNITY_EDITOR
+            false;
+#else
+            true;
+#endif
         public NativeClothWorking _clothWorking;
         public static float SpringRate = 1.0f;
 
@@ -117,10 +124,6 @@ namespace Gallop
             if (clothWorkingCount > clothWorkingArray.Length)
                 clothWorkingCount = clothWorkingArray.Length;
 
-            if (!isNative)
-                return;
-                
-
             if (linkSkirtIndex >= 0 && skirtCtrl != null && skirtCtrl.IsEnableSkirt)
             {
                 NativeSkirtWorking[] skirtWorkingArray = skirtCtrl.NativeWorkingArray;
@@ -195,6 +198,15 @@ namespace Gallop
             float addMoveRate,
             float springRate)
         {
+            if (!isNative)
+            {
+                CySpringSolver.NativeClothUpdate(clothWorkingArray, nClothWorking, collisionArray,
+                    rootParentWorkArray, stiffnessForceRate, dragForceRate, gravityRate,
+                    windX, windY, windZ, windStrength, bCollisionSwitch, timescale, is60FPS,
+                    moveRate, addMoveRate, springRate);
+                return;
+            }
+
             PinnedArray<NativeClothWorking> clothPin = null;
             PinnedArray<NativeClothCollision> collisionPin = null;
             PinnedArray<NativeRootParentWork> parentPin = null;
@@ -270,6 +282,15 @@ namespace Gallop
 
             if ((uint)skirtWorkingIndex >= (uint)skirtWorkingArray.Length)
                 return;
+
+            if (!isNative)
+            {
+                CySpringSolver.NativeClothSkirtUpdate(clothWorkingArray, nClothWorking, collisionArray,
+                    skirtWorkingArray, skirtWorkingIndex, ref arg, rootParentWorkArray,
+                    stiffnessForceRate, dragForceRate, gravityRate, windX, windY, windZ, windStrength,
+                    bCollisionSwitch, timescale, is60FPS, moveRate, addMoveRate, springRate);
+                return;
+            }
 
             PinnedArray<NativeClothWorking> clothPin = null;
             PinnedArray<NativeClothCollision> collisionPin = null;
@@ -387,14 +408,17 @@ namespace Gallop
             int workingIndex,
             ref NativeSkirtArg arg)
         {
-            if (!isNative)
-                return;
-
             if (workingArray == null || workingArray.Length == 0)
                 return;
 
             if ((uint)workingIndex >= (uint)workingArray.Length)
                 return;
+
+            if (!isNative)
+            {
+                CySpringSolver.NativeSkirtUpdate(ref workingArray[workingIndex], ref arg);
+                return;
+            }
 
             PinnedArray<NativeSkirtWorking> workingPin = null;
             PinnedValue<NativeSkirtArg> argPin = null;
@@ -435,9 +459,6 @@ namespace Gallop
             ref NativeSkirtWorking working,
             ref NativeSkirtArg arg)
         {
-            if (!isNative)
-                return;
-
             NativeSkirtWorking[] tempWorkingArray = new NativeSkirtWorking[1];
             tempWorkingArray[0] = working;
 
