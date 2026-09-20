@@ -217,7 +217,6 @@ namespace Gallop
             bool bCollisionSwitch, float timescale, bool is60FPS)
         {
             if (b.IsSkip != 0) return;
-            float D = (springRate != 0f) ? springRate : 1f;
 
             // 1) Verlet movement delta, then shift history
             // The drag term uses this RAW, unscaled. The .cpp halved it here at 30fps, but the
@@ -302,6 +301,27 @@ namespace Gallop
                     (float)((double)b.TargetPosition.z - ((double)delta.z + delta.z) * td + (double)b.Force.z * 3.0 * td));
             }
 
+            // 4b) Spring-apply rate: pull the simulated position back toward the pose the
+            // animation alone would give. The .cpp computed this factor into a local and then
+            // never used it, so the cloth was always fully simulated and never blended.
+            //
+            // The rate comes from moveRate or addMoveRate depending on IsAddSpring (0x164) at
+            // 0x180009d3e, is lerped against MoveSpringApplyRate (0x13c) at 0x180009d77-0x180009d8b,
+            // scales springRate, and is square-rooted at 60fps only (0x180009da5). It applies
+            // solely when the result is below 1 (0x180009db9), and before the length constraint.
+            // The rest position it blends toward is the bone's anchor offset along its own aim
+            // by InitBoneDistance (0x180009e0b-0x180009e4f).
+            float springApply = springRate;
+            float rate = (b.IsAddSpring != 0) ? addMoveRate : moveRate;
+            if (rate >= 0f)
+                springApply = (b.MoveSpringApplyRate + (1f - b.MoveSpringApplyRate) * rate) * springApply;
+            if (is60FPS) springApply = Mathf.Sqrt(springApply);
+            if (springApply < 1f)
+            {
+                Vector3 rest = b.SelfPosition + Norm(b.AimVector) * b.InitBoneDistance;
+                pos = rest + (pos - rest) * springApply;
+            }
+
             // 5) Length constraint to InitBoneDistance about the parent anchor
             Vector3 anchor = b.SelfPosition;
             ConstrainLength(ref b, anchor, ref pos);
@@ -341,7 +361,18 @@ namespace Gallop
             Quaternion final = Qmul(swing, q);
             // 8) Rotation limit, gated on IsLimit (0xec) at 0x18000a17e -- absent from the .cpp
             // entirely, and the single largest remaining source of FinalRotation error.
-            if (b.IsLimit != 0) final = ApplyRotationLimit(ref b, q, final);
+            if (b.IsLimit != 0)
+            {
+                final = ApplyRotationLimit(ref b, q, final);
+                // Clamping the rotation moves the bone, so the position is rebuilt from the
+                // clamped rotation instead of keeping the one the swing produced: the plugin
+                // takes a separate exit at 0x18000aa5a which re-derives TargetPosition as
+                // SelfPosition + normalised(aim) * InitBoneDistance, against the ordinary exit
+                // at 0x18000aac8 that just stores the settled position. Diff is written earlier
+                // and deliberately keeps the PRE-clamp direction, which is why a limited bone can
+                // show a matching Diff beside a TargetPosition that is off in the fourth decimal.
+                pos = b.SelfPosition + Norm(Qrot(final, b.BoneAxis)) * b.InitBoneDistance;
+            }
             b.FinalRotation = final;
             b.TargetPosition = pos;
 
@@ -357,7 +388,7 @@ namespace Gallop
 
         // springRate is threaded through the whole update; kept in a field so SolveCloth's
         // signature stays close to the .cpp without re-listing every rate on each call.
-        static float springRate;
+        static float springRate, moveRate, addMoveRate;
 
         public static void NativeClothUpdate(NativeClothWorking[] cond, int nCond,
             NativeClothCollision[] collisions, NativeRootParentWork[] parents,
@@ -369,6 +400,8 @@ namespace Gallop
             if (cond == null) return;
             if (nCond > cond.Length) nCond = cond.Length;
             springRate = springRateArg;
+            CySpringSolver.moveRate = moveRate;
+            CySpringSolver.addMoveRate = addMoveRate;
             // Clearing IsCheckSkirtKnee is per bone: the plugin's loop at 0x18000917d writes
             // [r10+rbx+0x138] with r10 = i * 0x168.
             for (int i = 0; i < nCond; i++) cond[i].IsCheckSkirtKnee = 0;

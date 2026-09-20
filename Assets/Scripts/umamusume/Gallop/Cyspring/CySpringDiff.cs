@@ -243,6 +243,10 @@ namespace Gallop
                         detail.AppendLine($"  in  BoneAxis          {VS(s0.BoneAxis)}");
                         detail.AppendLine($"  in  TargetPosition    {VS(s0.TargetPosition)}");
                         detail.AppendLine($"  in  SelfPosition      {VS(s0.SelfPosition)}");
+                        detail.AppendLine($"  in  PrevTargetPos     {VS(s0.PrevTargetPosition)}");
+                        detail.AppendLine($"  in  InitBoneDistance  {s0.InitBoneDistance:G9}  CollisionRadius {s0.CollisionRadius:G9}");
+                        detail.AppendLine($"  in  IsAddSpring {s0.IsAddSpring}  MoveSpringApplyRate {s0.MoveSpringApplyRate:G9}  DynamicRatio {s0.DynamicRatio:G9}");
+                        detail.AppendLine($"  in  CIndex 0-7        {s0.CIndex0},{s0.CIndex1},{s0.CIndex2},{s0.CIndex3},{s0.CIndex4},{s0.CIndex5},{s0.CIndex6},{s0.CIndex7}");
                     }
                     detail.AppendLine($"  nat AimVector         {VS(a.AimVector)}");
                     detail.AppendLine($"  man AimVector         {VS(b.AimVector)}");
