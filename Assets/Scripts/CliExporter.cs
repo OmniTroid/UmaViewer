@@ -53,6 +53,8 @@ public class CliExporter : MonoBehaviour
         var region = Opt("--region");
         if (region == "global") Config.Instance.Region = Region.Global;
         else if (region == "jp") Config.Instance.Region = Region.Jp;
+        // Force the managed CySpring solver (the C# port) instead of the native plugin.
+        if (Flag("--managed-physics")) Gallop.CySpringNative.isNative = false;
     }
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
