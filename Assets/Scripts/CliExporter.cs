@@ -229,7 +229,18 @@ public class CliExporter : MonoBehaviour
             // seam pop. Non-loop clips are recorded from the start.
             if (isLoop)
             {
-                float warm = 0f, warmTarget = Mathf.Max(1.5f, len * 2f);
+                // --warmup N: settle for N whole animation periods before capturing. The
+                // skeleton is periodic from the first loop, but the spring chains are damped
+                // oscillators driven by it and need several periods to fall into the orbit
+                // that repeats with the animation. Too few and the recorded cloth does not
+                // close: frame 0 and frame P disagree, which shows up once per tile.
+                // Default 2 is the long-standing behaviour and measurement says it is enough:
+                // sweeping 2/4/8/16/32 periods moved the cloth wrap by under half a degree,
+                // so the chains have already settled by two. The knob exists for diagnosis.
+                float.TryParse(Opt("--warmup", "2"), out float warmPeriods);
+                if (warmPeriods < 1f) warmPeriods = 1f;
+                float warm = 0f, warmTarget = Mathf.Max(1.5f, len * warmPeriods);
+                Debug.Log($"CLI_EXPORT: warming {warmPeriods:0.#} periods ({warmTarget:0.00}s) before capture");
                 while (warm < warmTarget) { warm += Time.deltaTime; yield return null; }
             }
 

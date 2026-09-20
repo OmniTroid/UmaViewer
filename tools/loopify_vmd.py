@@ -84,6 +84,7 @@ def main():
     ap.add_argument('--tiles', type=int, default=1, help='repeat the loop N times (e.g. slower blink cadence)')
     ap.add_argument('--pmin', type=int, default=8); ap.add_argument('--pmax', type=int, default=90)
     ap.add_argument('--crossfade', type=int, default=6, help='tail crossfade frames')
+    ap.add_argument('--seam-cloth', action='store_true', help='include non-core (baked cloth) tracks when choosing the loop phase')
     a = ap.parse_args()
 
     hdr, name, bones, morphs, tail = parse(a.input)
@@ -106,9 +107,17 @@ def main():
     tol = mind * 0.5 + 0.5
     P = min(P for d, P in cand if d <= mind + tol)
 
+    # Phase choice. The period belongs to the body, but the seam does not: with baked
+    # spring-bone tracks the cloth has to close too, and the phase that suits the skeleton
+    # can leave a long chain like the tail mid-swing. Score both, weighting the body higher
+    # so a cloth outlier cannot drag the skeleton off its own best phase.
+    seam_bones = [k for k in bones if k not in CORE] if a.seam_cloth else []
     best = None
     for F0 in range(15, maxf-P-a.crossfade):
         m = max(ang(sample_bone(bones[k], F0+P)[1], sample_bone(bones[k], F0)[1]) for k in core)
+        if seam_bones:
+            c = max(ang(sample_bone(bones[k], F0+P)[1], sample_bone(bones[k], F0)[1]) for k in seam_bones)
+            m = m + 0.5 * c
         if best is None or m < best[0]: best = (m, F0)
     _, F0 = best
     K = min(a.crossfade, P//2)
