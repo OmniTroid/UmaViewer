@@ -161,6 +161,27 @@ public class CliExporter : MonoBehaviour
             Quit(0); yield break;
         }
 
+        // --solver-diff <file.txt>: step the managed CySpring port alongside the native plugin
+        // and report where they disagree. Runs the animation with physics on; every frame the
+        // port solves a copy of the pre-step state while the plugin advances the real one, so
+        // each residual belongs to a single step instead of accumulating. Needs the real DLL,
+        // so Windows only, and it forces the native path regardless of --managed-physics.
+        string diffPath = Opt("--solver-diff");
+        if (!string.IsNullOrEmpty(diffPath))
+        {
+            if (string.IsNullOrEmpty(animId)) { Fail("--solver-diff needs --anim"); yield break; }
+            Gallop.CySpringNative.isNative = true;   // the plugin is the reference; the port is the candidate
+            Gallop.CySpringDiff.Reset();
+            Gallop.CySpringDiff.Armed = true;
+            yield return RunSafe(RecordPhysicsRef(container, main, animId, diffPath + ".ref.json"), e => buildErr = e);
+            Gallop.CySpringDiff.Armed = false;
+            if (buildErr != null) { Fail("solver-diff threw: " + buildErr); yield break; }
+            Gallop.CySpringDiff.Write(diffPath);
+            Debug.Log("DIFF" + System.Environment.NewLine + Gallop.CySpringDiff.Report());
+            Debug.Log("CLI_EXPORT_DONE " + diffPath);
+            Quit(0); yield break;
+        }
+
         string physRefPath = Opt("--physics-ref");
         if (!string.IsNullOrEmpty(physRefPath))
         {

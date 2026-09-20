@@ -207,6 +207,20 @@ namespace Gallop
                 return;
             }
 
+            // Differential mode: step the managed port on a copy of the pre-step state, let the
+            // plugin below advance the real state, then compare. Same input, one step, so the
+            // residual is attributable rather than accumulated. The simulation keeps the
+            // plugin's result, which makes every later frame a fresh comparison too.
+            NativeClothWorking[] managedOut = null;
+            if (CySpringDiff.Armed)
+            {
+                managedOut = CySpringDiff.Snapshot(clothWorkingArray);
+                CySpringSolver.NativeClothUpdate(managedOut, nClothWorking, collisionArray,
+                    rootParentWorkArray, stiffnessForceRate, dragForceRate, gravityRate,
+                    windX, windY, windZ, windStrength, bCollisionSwitch, timescale, is60FPS,
+                    moveRate, addMoveRate, springRate);
+            }
+
             PinnedArray<NativeClothWorking> clothPin = null;
             PinnedArray<NativeClothCollision> collisionPin = null;
             PinnedArray<NativeRootParentWork> parentPin = null;
@@ -250,6 +264,10 @@ namespace Gallop
                 if (clothPin != null)
                     clothPin.Dispose();
             }
+
+            // Compare after the pin is released, so clothWorkingArray holds the plugin's output.
+            if (managedOut != null)
+                CySpringDiff.Compare(clothWorkingArray, managedOut, nClothWorking);
         }
 
         private static void UpdateNativeClothSkirtInternal(
