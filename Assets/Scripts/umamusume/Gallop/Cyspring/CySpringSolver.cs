@@ -32,7 +32,13 @@ namespace Gallop
         {
             Vector3 an = Norm(a), bn = Norm(b);
             float d = Vector3.Dot(an, bn);
-            if (d >= 1f - 1e-6f) return new Quaternion(0, 0, 0, 1);
+            // No near-parallel shortcut. The obvious `if (d >= 1 - 1e-6) return identity` is both
+            // unnecessary and wrong here: the construction below is already well conditioned as
+            // d approaches 1 (s -> 2, cross -> 0, so it yields identity on its own), while the
+            // guard quantises every swing below ~0.081 degrees to nothing. Real swings live right
+            // on that boundary -- the last two divergences in the differential were a 0.092 degree
+            // rotation with d = 0.9999987 against a threshold of 0.999999, close enough that
+            // float32 rounding decided it. Only the antipodal case genuinely needs a branch.
             if (d <= -1f + 1e-6f)
             {
                 Vector3 ax = Norm(Vector3.Cross(new Vector3(1, 0, 0), an));
