@@ -211,9 +211,10 @@ namespace Gallop
             // plugin below advance the real state, then compare. Same input, one step, so the
             // residual is attributable rather than accumulated. The simulation keeps the
             // plugin's result, which makes every later frame a fresh comparison too.
-            NativeClothWorking[] managedOut = null;
+            NativeClothWorking[] managedOut = null, preState = null;
             if (CySpringDiff.Armed)
             {
+                preState = CySpringDiff.Snapshot(clothWorkingArray);
                 managedOut = CySpringDiff.Snapshot(clothWorkingArray);
                 CySpringSolver.NativeClothUpdate(managedOut, nClothWorking, collisionArray,
                     rootParentWorkArray, stiffnessForceRate, dragForceRate, gravityRate,
@@ -267,7 +268,7 @@ namespace Gallop
 
             // Compare after the pin is released, so clothWorkingArray holds the plugin's output.
             if (managedOut != null)
-                CySpringDiff.Compare(clothWorkingArray, managedOut, nClothWorking);
+                CySpringDiff.Compare(clothWorkingArray, managedOut, preState, nClothWorking);
         }
 
         private static void UpdateNativeClothSkirtInternal(

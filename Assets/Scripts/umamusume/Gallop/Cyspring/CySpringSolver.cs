@@ -8,6 +8,9 @@ namespace Gallop
     // .cpp math, unit constants, and stages; see that file for the fidelity notes.
     public static class CySpringSolver
     {
+        // 30fps baseline divisor applied to every force term; see SolveCloth.
+        const float FORCE_DIV = 30f;
+
         static Quaternion Qmul(Quaternion a, Quaternion b) => new Quaternion(
             a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
             a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
@@ -41,45 +44,117 @@ namespace Gallop
             return new Quaternion(c.x * inv, c.y * inv, c.z * inv, s * 0.5f);
         }
 
+        // Sixteen slots, not eight. The plugin picks the base off the slot number at 0x180007370:
+        // slots 0-7 come from CIndex0 at 0xf4, slots 8-15 from 0x144, both indexed by i*2 --
+        // which lands on CIndex8..15 at 0x154..0x162. The .cpp only ever read the first eight,
+        // so every collider past the eighth was silently ignored.
         static int CIndex(ref NativeClothWorking b, int i)
         {
             switch (i)
             {
                 case 0: return b.CIndex0; case 1: return b.CIndex1; case 2: return b.CIndex2; case 3: return b.CIndex3;
-                case 4: return b.CIndex4; case 5: return b.CIndex5; case 6: return b.CIndex6; default: return b.CIndex7;
+                case 4: return b.CIndex4; case 5: return b.CIndex5; case 6: return b.CIndex6; case 7: return b.CIndex7;
+                case 8: return b.CIndex8; case 9: return b.CIndex9; case 10: return b.CIndex10; case 11: return b.CIndex11;
+                case 12: return b.CIndex12; case 13: return b.CIndex13; case 14: return b.CIndex14; default: return b.CIndex15;
             }
         }
 
-        static void ResolveOne(ref NativeClothWorking bne, ref NativeClothCollision c, ref Vector3 pos)
+        /// Colliders are stored in their root parent's space and transformed to world on every
+        /// use: 0x180007c3e reads the collider's own ParentWorkIndex (0x40), scales by the 0x20
+        /// NativeRootParentWork stride, rotates Position by WorldRotation (+0x10) and adds
+        /// WorldPosition (+0x00) at 0x180007d7f/0x180007db8/0x180007e07. The .cpp used Position
+        /// raw, which is only right when that parent happens to be identity.
+        static Vector3 ColliderWorld(Vector3 local, NativeRootParentWork[] parents, int pi)
+        {
+            if (parents == null || pi < 0 || pi >= parents.Length) return local;
+            return Qrot(parents[pi].WorldRotation, local) + parents[pi].WorldPosition;
+        }
+
+        /// Push pos onto the sphere of radius R about center, from whichever side IsInner asks.
+        static void PushToSphere(Vector3 center, float R, bool inner, ref Vector3 pos)
+        {
+            Vector3 d = pos - center;
+            float dist = Len(d);
+            if (dist <= 1e-6f) return;
+            if (inner) { if (dist > R) pos = center + d * (R / dist); }
+            else       { if (dist < R) pos = center + d * (R / dist); }
+        }
+
+        static void ResolveOne(ref NativeClothWorking bne, ref NativeClothCollision c,
+                               NativeRootParentWork[] parents, ref Vector3 pos)
         {
             if (c.IsEnable == 0) return;
-            float R = c.Radius + bne.CollisionRadius;
-            Vector3 center = c.Position;
-            if (c.Type != 0) // capsule: closest point on segment Position..Position2
+            // Character colliders only apply to bones that asked for them (0x180007397): if the
+            // bone's CheckCharaCollision is clear, every IsCharaCollision collider is skipped.
+            if (bne.CheckCharaCollision == 0 && c.IsCharaCollision != 0) return;
+
+            // An inner collider SUBTRACTS the bone radius where an outer one adds it
+            // (0x180007e26 subss against 0xcc on the IsInner branch). The .cpp added it on both.
+            bool inner = c.IsInner != 0;
+            float R = inner ? c.Radius - bne.CollisionRadius : c.Radius + bne.CollisionRadius;
+
+            // Type dispatch at 0x1800073b6: 0 sphere, 2 capsule, 3 plane, and 1 deliberately
+            // falls through unhandled. The .cpp treated every non-zero type as a capsule, so
+            // planes were solved as capsules, and type 1 was solved when it should be skipped.
+            switch (c.Type)
             {
-                Vector3 ab = c.Position2 - c.Position;
-                float t = Vector3.Dot(pos - c.Position, ab) / (Vector3.Dot(ab, ab) + 1e-8f);
-                t = t < 0 ? 0 : (t > 1 ? 1 : t);
-                center = c.Position + ab * t;
+                case 0:
+                    PushToSphere(ColliderWorld(c.Position, parents, c.ParentWorkIndex), R, inner, ref pos);
+                    break;
+
+                case 2:
+                {
+                    Vector3 p0 = ColliderWorld(c.Position, parents, c.ParentWorkIndex);
+                    Vector3 p1 = ColliderWorld(c.Position2, parents, c.ParentWorkIndex);
+                    Vector3 ab = p1 - p0;
+                    float t = Vector3.Dot(pos - p0, ab) / (Vector3.Dot(ab, ab) + 1e-8f);
+                    t = t < 0 ? 0 : (t > 1 ? 1 : t);
+                    PushToSphere(p0 + ab * t, R, inner, ref pos);
+                    break;
+                }
+
+                case 3:
+                {
+                    // Half-space. Normal is used untransformed here -- this branch never reads
+                    // the collider's ParentWorkIndex, unlike the sphere and capsule ones.
+                    Vector3 n = c.Normal;
+                    float dot = pos.x * n.x + pos.y * n.y + pos.z * n.z - c.Distance;
+                    if (dot > bne.CollisionRadius) break;               // comiss/ja at 0x180007412
+                    pos = pos + n * (bne.CollisionRadius - dot);
+                    ConstrainLength(ref bne, bne.SelfPosition, ref pos); // 0x18000744e
+                    break;
+                }
             }
-            Vector3 dd = pos - center;
-            float dist = Len(dd);
-            if (c.IsInner != 0) { if (dist > R && dist > 1e-6f) pos = center + dd * (R / dist); }   // clamp inside
-            else                { if (dist < R && dist > 1e-6f) pos = center + dd * (R / dist); }   // push outside
         }
 
-        static void ResolveCollisions(ref NativeClothWorking bne, NativeClothCollision[] col, ref Vector3 pos)
+        /// ActiveCollision is a COUNT of occupied collider slots, not a flag: the loop at
+        /// 0x180008018 increments and compares against it. The .cpp read it as a boolean and
+        /// then walked a fixed eight slots, so it both over- and under-ran the real list.
+        static void ResolveCollisions(ref NativeClothWorking bne, NativeClothCollision[] col,
+                                      NativeRootParentWork[] parents, ref Vector3 pos)
         {
             if (col == null) return;
-            for (int i = 0; i < 8; i++)
+            int n = bne.ActiveCollision;
+            if (n > 16) n = 16;
+            for (int i = 0; i < n; i++)
             {
                 int idx = CIndex(ref bne, i);
                 if (idx < 0 || idx >= col.Length) continue; // -1 marks an empty slot
-                ResolveOne(ref bne, ref col[idx], ref pos);
+                ResolveOne(ref bne, ref col[idx], parents, ref pos);
             }
         }
 
-        static void SolveCloth(ref NativeClothWorking b, NativeClothCollision[] col,
+        /// Pull the bone back onto the sphere of radius InitBoneDistance about its anchor. The
+        /// plugin runs this twice on the skirt-knee path, so it lives in one place.
+        static void ConstrainLength(ref NativeClothWorking b, Vector3 anchor, ref Vector3 pos)
+        {
+            Vector3 dir = pos - anchor;
+            float dl = Len(dir);
+            if (dl > 1e-6f) pos = anchor + dir * (b.InitBoneDistance / dl);
+        }
+
+        static void SolveCloth(int idx, ref NativeClothWorking b, NativeClothCollision[] col,
+            NativeRootParentWork[] parents,
             float stiffnessForceRate, float dragForceRate, float gravityRate,
             float windX, float windY, float windZ, float windStrength,
             bool bCollisionSwitch, float timescale, bool is60FPS)
@@ -92,42 +167,98 @@ namespace Gallop
             if (!is60FPS) delta = delta * 0.5f;  // 30fps baseline
             b.PrevTargetPosition = b.TargetPosition;
 
-            // 2) Aim = BoneAxis rotated by (ParentRotation . InitLocalRotation)
+            // 2) Aim = BoneAxis rotated by (ParentRotation . InitLocalRotation).
+            //
+            // This deliberately does NOT write AnimationRotation. An earlier reading had the
+            // solve produce it, on the evidence that it equalled Qmul(ParentRotation,
+            // InitLocalRotation) to seven digits -- but that only held on the chain root over the
+            // first few frames, where the incoming AnimationRotation still happened to equal
+            // InitLocalRotation. On bone 4 at frame 289 the two were nothing alike. It is really
+            // an accumulator threaded down the chain by the caller loop, so the solve reads it
+            // and must leave it alone.
             Quaternion q = Qmul(b.ParentRotation, b.InitLocalRotation);
             b.AimVector = Qrot(q, b.BoneAxis);
+
+            if (CySpringDiff.Armed)
+            {
+                CySpringDiff.NoteAim(idx, 0, b.AimVector);
+                CySpringDiff.NoteAim(idx, 1, Qrot(b.AnimationRotation, b.BoneAxis));
+                CySpringDiff.NoteAim(idx, 2, Qrot(b.ParentRotation, b.BoneAxis));
+                CySpringDiff.NoteAim(idx, 3, Qrot(Qmul(b.AnimationRotation, b.InitLocalRotation), b.BoneAxis));
+                CySpringDiff.NoteAim(idx, 4, Norm(b.TargetPosition - b.SelfPosition));
+                CySpringDiff.NoteAim(idx, 5, Qrot(Qmul(b.ParentRotation, b.AnimationRotation), b.BoneAxis));
+            }
 
             // 3) Forces. Divisors read out of the plugin, not guessed: NativeClothUpdate at
             // 0x180009aed multiplies by StiffnessForce (0xc4) then divides by the float at
             // 0x18008ec8c = 1000, and multiplies by DragForce (0xc8) then divides by the one at
             // 0x18008ec80 = 100. The .cpp reconstruction had these two transposed, which made
             // stiffness 10x too strong and drag 10x too weak on every bone.
-            float stiff = (b.StiffnessForce / 1000f) * stiffnessForceRate / D;
-            float drag  = (b.DragForce / 100f) * dragForceRate / D;
+            // Every force term is also divided by 30, the 30fps baseline the constants are tuned
+            // for. The plugin loads that literal into xmm8 at 0x180009ac0 (from 0x18008ec7c) and
+            // divides stiffness, drag, gravity and ExtraForce by it -- 0x180009b1f, 0x180009b24,
+            // 0x180009bef, 0x180009c26. It is NOT springRate, which the .cpp mistook it for, and
+            // wind is pointedly not divided. Omitting it made every force exactly 30x too large.
+            float stiff = (b.StiffnessForce / 1000f) * stiffnessForceRate / FORCE_DIV;
+            float drag  = (b.DragForce / 100f) * dragForceRate / FORCE_DIV;
             float windH = b.HorizontalWindRateSlow + (b.HorizontalWindRateFast - b.HorizontalWindRateSlow) * windStrength;
             float windV = b.VerticalWindRateSlow + (b.VerticalWindRateFast - b.VerticalWindRateSlow) * windStrength;
-            float grav  = (gravityRate * b.Gravity / 10000f) / D;
+            float grav  = (gravityRate * b.Gravity / 10000f) / FORCE_DIV;
             Vector3 ef = b.ConnectedForce; // .cpp ExtraForce (0x144)
             b.Force = new Vector3(
-                stiff * b.AimVector.x + drag * delta.x + windH * windX + ef.x / D,
-                stiff * b.AimVector.y + drag * delta.y + windV * windY - grav + ef.y / D,
-                stiff * b.AimVector.z + drag * delta.z + windH * windZ + ef.z / D);
+                stiff * b.AimVector.x + drag * delta.x + windH * windX + ef.x / FORCE_DIV,
+                stiff * b.AimVector.y + drag * delta.y + windV * windY - grav + ef.y / FORCE_DIV,
+                stiff * b.AimVector.z + drag * delta.z + windH * windZ + ef.z / FORCE_DIV);
 
             // 4) Integrate (Verlet)
             Vector3 pos = b.TargetPosition - delta * timescale + b.Force;
 
             // 5) Length constraint to InitBoneDistance about the parent anchor
             Vector3 anchor = b.SelfPosition;
-            Vector3 dir = pos - anchor;
-            float dl = Len(dir);
-            if (dl > 1e-6f) pos = anchor + dir * (b.InitBoneDistance / dl);
-            b.Diff = pos - b.TargetPosition;
+            ConstrainLength(ref b, anchor, ref pos);
 
             // 6) Collision
-            if (bCollisionSwitch && b.ActiveCollision != 0) ResolveCollisions(ref b, col, ref pos);
+            if (bCollisionSwitch && b.ActiveCollision > 0) ResolveCollisions(ref b, col, parents, ref pos);
 
-            // 7) Commit
-            b.FinalRotation = Qmul(QFromTo(b.AimVector, Norm(pos - anchor)), q);
+            // 6b) Skirt-knee plane push. A half-space test the .cpp left out entirely: if the
+            // bone has fallen within CollisionRadius of the knee plane it is pushed back out
+            // along SkirtKneeNormal, and the length constraint is then re-applied because that
+            // push moves it off the InitBoneDistance sphere. The plugin gates this on
+            // IsCheckSkirtKnee (0x138) at 0x180009f69, dots pos - SkirtNormalPos (0x128) against
+            // SkirtKneeNormal (0x118) at 0x180009f7a-0x180009fc4, and takes the branch only when
+            // CollisionRadius > dot (comiss/jbe at 0x180009fc8). The second constraint is the
+            // block at 0x18000a019, reached on this path alone.
+            if (b.IsCheckSkirtKnee != 0)
+            {
+                Vector3 n = b.SkirtKneeNormal;
+                Vector3 d = pos - b.SkirtNormalPos;
+                float dot = d.x * n.x + d.y * n.y + d.z * n.z;
+                if (b.CollisionRadius > dot)
+                {
+                    pos = pos + n * (b.CollisionRadius - dot);
+                    ConstrainLength(ref b, anchor, ref pos);
+                }
+            }
+
+            // 7) Commit. Diff holds the NORMALISED direction from the anchor to the settled
+            // position, not the raw movement the .cpp assumed. The plugin writes the raw
+            // difference to 0x80 at 0x18000a0a7, then divides by its length and overwrites the
+            // same three floats at 0x18000a10d -- so the surviving value is a unit vector, which
+            // is why the port's small delta sat a full 1.0 away from it. It is also exactly the
+            // vector the final rotation needs, so compute it once.
+            Vector3 aimTo = Norm(pos - anchor);
+            b.Diff = aimTo;
+            Quaternion swing = QFromTo(b.AimVector, aimTo);
+            b.FinalRotation = Qmul(swing, q);
             b.TargetPosition = pos;
+
+            if (CySpringDiff.Armed)
+            {
+                CySpringDiff.NoteFinal(idx, 0, Qmul(swing, q));
+                CySpringDiff.NoteFinal(idx, 1, Qmul(swing, b.AnimationRotation));
+                CySpringDiff.NoteFinal(idx, 2, Qmul(swing, b.ParentRotation));
+                CySpringDiff.NoteFinal(idx, 3, Qmul(swing, Qmul(b.ParentRotation, b.AnimationRotation)));
+            }
         }
 
         // springRate is threaded through the whole update; kept in a field so SolveCloth's
@@ -144,13 +275,40 @@ namespace Gallop
             if (cond == null) return;
             if (nCond > cond.Length) nCond = cond.Length;
             springRate = springRateArg;
+            // Clearing IsCheckSkirtKnee is per bone: the plugin's loop at 0x18000917d writes
+            // [r10+rbx+0x138] with r10 = i * 0x168.
             for (int i = 0; i < nCond; i++) cond[i].IsCheckSkirtKnee = 0;
+
             for (int i = 0; i < nCond; i++)
             {
-                int idx = cond[i].ParentWorkIndex; // .cpp RootParentIndex (0x140)
-                if (parents != null && (uint)idx < (uint)parents.Length)
-                    cond[i].AnimationRotation = Qmul(parents[idx].WorldRotation, cond[i].AnimationRotation);
-                SolveCloth(ref cond[i], collisions, stiffnessForceRate, dragForceRate, gravityRate,
+                // Chain the bone onto the one before it. The .cpp solved every bone from the
+                // caller's snapshot, which is only right for the root: the plugin walks the list
+                // in order and feeds each bone the PREVIOUS bone's freshly solved result, so a
+                // chain moves as a chain instead of every link pivoting about a stale anchor.
+                // The loop body at 0x1800093a1 copies with two 16-byte moves, off a 0x168 stride:
+                //   [rax+rbx-0x128] -> [r9+0x90]   cond[i-1].TargetPosition -> SelfPosition
+                //   [rax+rbx-0x148] -> [r9+0x10]   cond[i-1].FinalRotation  -> ParentRotation
+                // and then premultiplies this bone's local AnimationRotation by cond[i-1]'s
+                // (0x1800093e5 reads cond[i-1] + 0x114, its .w).
+                //
+                // The root has no predecessor, so it is seeded from the root-parent array the
+                // .cpp ignored entirely: 0x1800091ac reads ParentWorkIndex (0x140), 0x1800091ce
+                // scales it by the 0x20 NativeRootParentWork stride, and 0x1800091d2 takes the
+                // quaternion at +0x10 -- WorldRotation.
+                if (i == 0)
+                {
+                    int pi = cond[0].ParentWorkIndex;
+                    if (parents != null && pi >= 0 && pi < parents.Length)
+                        cond[0].AnimationRotation = Qmul(parents[pi].WorldRotation, cond[0].AnimationRotation);
+                }
+                else
+                {
+                    cond[i].SelfPosition = cond[i - 1].TargetPosition;
+                    cond[i].ParentRotation = cond[i - 1].FinalRotation;
+                    cond[i].AnimationRotation = Qmul(cond[i - 1].AnimationRotation, cond[i].AnimationRotation);
+                }
+
+                SolveCloth(i, ref cond[i], collisions, parents, stiffnessForceRate, dragForceRate, gravityRate,
                     windX, windY, windZ, windStrength, bCollisionSwitch, timescale, is60FPS);
             }
         }
