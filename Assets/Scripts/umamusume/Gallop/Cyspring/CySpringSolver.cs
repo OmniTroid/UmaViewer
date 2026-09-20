@@ -144,6 +144,63 @@ namespace Gallop
             }
         }
 
+        static Quaternion QConj(Quaternion q) => new Quaternion(-q.x, -q.y, -q.z, q.w);
+
+        /// One axis of the rotation limit. The plugin normalises with fmod(a + 360, 360) (the
+        /// three fmod calls at 0x18000a4ca/0x18000a4e9/0x18000a506, against the 360.0 at
+        /// 0x18008eca0), folds anything above 180 back down by 360 (0x18000a516 onwards against
+        /// the 180.0 at 0x18008ec84), and only then clamps.
+        ///
+        /// The clamp is lopsided and that is not a typo: 0x18000a558 NEGATES LimitRotationMin
+        /// before comparing, so the low edge is -Min, not Min. The shape at 0x18000a55c is
+        /// (-Min > a) ? -Min : min(Max, a).
+        static float ClampLimitAngle(float a, float lo, float hi)
+        {
+            a = a % 360f;
+            if (a < 0f) a += 360f;
+            if (a > 180f) a -= 360f;
+            float min = -lo;
+            return (min > a) ? min : Mathf.Min(hi, a);
+        }
+
+        /// Clamp the bone's deflection from its rest pose into the per-axis limit box.
+        ///
+        /// The angles are Unity's own ZXY euler convention in degrees, not an ad-hoc one: the
+        /// helper at 0x180008400 is a transliteration of UnityEngine's QuaternionToEuler, down to
+        /// the FLT_EPSILON gimbal test (0x18008ebe8) against +-1, the +-pi/2 lock values
+        /// (0x18008ec0c/0x18008ec98) and the closing conversion by 360/2pi at 0x180008645. So
+        /// Quaternion.eulerAngles and Quaternion.Euler reproduce it directly, degrees and
+        /// [0,360) range included, instead of needing the extraction hand-ported.
+        static Quaternion ApplyRotationLimit(ref NativeClothWorking b, Quaternion q, Quaternion final)
+        {
+            Quaternion local = Qmul(QConj(q), final);
+            Vector3 e = local.eulerAngles;
+            e.x = ClampLimitAngle(e.x, b.LimitRotationMin.x, b.LimitRotationMax.x);
+            e.y = ClampLimitAngle(e.y, b.LimitRotationMin.y, b.LimitRotationMax.y);
+            e.z = ClampLimitAngle(e.z, b.LimitRotationMin.z, b.LimitRotationMax.z);
+            return Qmul(q, Quaternion.Euler(e));
+        }
+
+        // Two alternates, scored alongside the primary so one run decides the composition order
+        // and the sign of the low edge rather than a rebuild per guess.
+        static Quaternion ApplyRotationLimitRight(ref NativeClothWorking b, Quaternion q, Quaternion final)
+        {
+            Vector3 e = Qmul(final, QConj(q)).eulerAngles;
+            e.x = ClampLimitAngle(e.x, b.LimitRotationMin.x, b.LimitRotationMax.x);
+            e.y = ClampLimitAngle(e.y, b.LimitRotationMin.y, b.LimitRotationMax.y);
+            e.z = ClampLimitAngle(e.z, b.LimitRotationMin.z, b.LimitRotationMax.z);
+            return Qmul(Quaternion.Euler(e), q);
+        }
+
+        static Quaternion ApplyRotationLimitPosMin(ref NativeClothWorking b, Quaternion q, Quaternion final)
+        {
+            Vector3 e = Qmul(QConj(q), final).eulerAngles;
+            e.x = ClampLimitAngle(e.x, -b.LimitRotationMin.x, b.LimitRotationMax.x);
+            e.y = ClampLimitAngle(e.y, -b.LimitRotationMin.y, b.LimitRotationMax.y);
+            e.z = ClampLimitAngle(e.z, -b.LimitRotationMin.z, b.LimitRotationMax.z);
+            return Qmul(q, Quaternion.Euler(e));
+        }
+
         /// Pull the bone back onto the sphere of radius InitBoneDistance about its anchor. The
         /// plugin runs this twice on the skirt-knee path, so it lives in one place.
         static void ConstrainLength(ref NativeClothWorking b, Vector3 anchor, ref Vector3 pos)
@@ -249,15 +306,20 @@ namespace Gallop
             Vector3 aimTo = Norm(pos - anchor);
             b.Diff = aimTo;
             Quaternion swing = QFromTo(b.AimVector, aimTo);
-            b.FinalRotation = Qmul(swing, q);
+            Quaternion final = Qmul(swing, q);
+            // 8) Rotation limit, gated on IsLimit (0xec) at 0x18000a17e -- absent from the .cpp
+            // entirely, and the single largest remaining source of FinalRotation error.
+            if (b.IsLimit != 0) final = ApplyRotationLimit(ref b, q, final);
+            b.FinalRotation = final;
             b.TargetPosition = pos;
 
             if (CySpringDiff.Armed)
             {
-                CySpringDiff.NoteFinal(idx, 0, Qmul(swing, q));
-                CySpringDiff.NoteFinal(idx, 1, Qmul(swing, b.AnimationRotation));
-                CySpringDiff.NoteFinal(idx, 2, Qmul(swing, b.ParentRotation));
-                CySpringDiff.NoteFinal(idx, 3, Qmul(swing, Qmul(b.ParentRotation, b.AnimationRotation)));
+                Quaternion raw = Qmul(swing, q);
+                CySpringDiff.NoteFinal(idx, 0, raw);                                  // unclamped
+                CySpringDiff.NoteFinal(idx, 1, final);                                // q * clamp(conj(q)*raw)
+                CySpringDiff.NoteFinal(idx, 2, ApplyRotationLimitRight(ref b, q, raw)); // clamp(raw*conj(q)) * q
+                CySpringDiff.NoteFinal(idx, 3, ApplyRotationLimitPosMin(ref b, q, raw)); // min not negated
             }
         }
 

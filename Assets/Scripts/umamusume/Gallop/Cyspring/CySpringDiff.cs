@@ -95,7 +95,7 @@ namespace Gallop
         // FinalRotation at the same time.
         public const int NQCAND = 4;
         public static readonly string[] QCandNames =
-            { "Qmul(Parent,InitLocal)", "AnimationRotation", "ParentRotation", "Qmul(Parent,Anim)" };
+            { "unclamped", "q*clamp(conj(q)*F)", "clamp(F*conj(q))*q", "clamp with +Min" };
         static readonly Quaternion[] qcand = new Quaternion[MAXB * NQCAND];
         static readonly bool[] qcandSet = new bool[MAXB];
         static readonly long[] qcandMatch = new long[NQCAND];
