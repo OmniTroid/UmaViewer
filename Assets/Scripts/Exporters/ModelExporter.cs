@@ -94,64 +94,21 @@ public class ModelExporter
             model.Description = model.DescriptionEn = $"{container.gameObject.name}\n{modelInfo}";
         }
 
-        //Rean Bones
-        var rootBone = container.transform.Find("Position");
-        if (rootBone == null)
-        {
-            rootBone = container.transform;
-        }
-        List<Transform> allBones = new List<Transform>(rootBone.GetComponentsInChildren<Transform>());
-        allBones.RemoveAll(o => o.name.Contains("Col_"));
-
-        // Filter bones for export
-        List<Transform> exportBones = new List<Transform>();
-        foreach(var bone in allBones)
-        {
-            bool isKeep = true;
-            string bName = bone.name;
-
-            // Keep Eyes
-            if(bName == "Eye_L" || bName == "Eye_R")
-            {
-                isKeep = true;
-            }
-            // Filter Facial details
-            else if (bName.StartsWith("Facial_") || 
-                     bName.StartsWith("Lip_") || 
-                     // bName.StartsWith("Jaw") || // Keep Jaw 
-                     // bName.Equals("Chin") ||       // Keep Chin (Explicitly check if it was being filtered, though it usually isn't unless under Facial)
-                     bName.StartsWith("Mouth_") || 
-                     // bName.StartsWith("Tongue_") || // Keep Tongue
-                     bName.StartsWith("Tooth_") ||
-                     bName.StartsWith("Cheek") ||
-                     bName.StartsWith("Eyelid") ||
-                     // [Fix] Remove extra Eye bones (e.g. Eye_High_L) to prevent double transformation/flying artifacts
-                     (bName.StartsWith("Eye_") && bName != "Eye_L" && bName != "Eye_R") ||
-                     bName.StartsWith("Nose") ||
-                     bName.StartsWith("Ear"))
-            {
-                isKeep = false;
-            }
-            // Drop the model's Blender-style control rig (IK handles, offset/twist
-            // control bones). babylon-mmd expects a plain MMD skeleton and mangles
-            // these; skinning weights on them fall through to the nearest kept bone
-            // (see GetBoneIndex), so removing them is geometry-preserving at bind.
-            else if (IsControlBone(bName))
-            {
-                isKeep = false;
-            }
-
-            if(isKeep)
-            {
-                exportBones.Add(bone);
-            }
-        }
-
-        //Read vertices And triangles
+        // Bones: a standard MMD skeleton from the weighted runtime bones, plus every CySpring
+        // bone so rigid bodies and baked tracks have a bone to bind to. The spring-bone short
+        // names are built over the same set the VMD bake uses, so the two agree.
+        var skeletonRoot = container.transform.Find("Position") ?? container.transform;
         List<Renderer> renderers = new List<Renderer>(container.GetComponentsInChildren<Renderer>());
+        var springBones = new List<Transform>();
+        var springNames = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var tr in container.GetComponentsInChildren<Transform>(true))
+            if (SpringBoneNames.IsSpringBone(tr.name) && springNames.Add(tr.name)) springBones.Add(tr);
+        var boneResult = PMXBoneExporter.Build(skeletonRoot, container.transform, renderers, springBones,
+            SpringBoneNames.BuildMap(springNames));
+        model.Bones = boneResult.Bones;
+
         List<int> triangles = new List<int>();
-        // Pass exportBones to ReadVerticesAndTriangles so it knows valid bones
-        model.Vertices = ReadVerticesAndTriangles(renderers, exportBones, ref triangles, container.transform);
+        model.Vertices = ReadVerticesAndTriangles(renderers, boneResult, ref triangles, container.transform);
         model.TriangleIndexes = triangles.ToArray();
 
         //Read Texture reference
@@ -161,7 +118,6 @@ public class ModelExporter
         }
 
         model.Parts = ReadPartMaterials(renderers, model);
-        model.Bones = ReadBones(exportBones);
         if(container is UmaContainerCharacter chara)
         {
             ClearBlendShape(chara);
@@ -171,7 +127,7 @@ public class ModelExporter
         model.Rigidbodies = new MMDRigidBody[0];
         model.Joints = new MMDJoint[0];
 
-        ReorderLowerBody(model);
+        BuildDisplayFrames(model);
 
         // Skirt/hair/tail physics: convert CySpring spring bones into PMX rigid bodies +
         // joints so a runtime (babylon-mmd) can simulate them. Runs after the reorder so
@@ -525,213 +481,7 @@ public class ModelExporter
 
     // Unity骨骼名 → MMD日文名の映射字典
     // 与VMD导出时的骨骼名称完全对应（UseCenterAsParentOfAll=true时的默认映射）
-    private static readonly Dictionary<string, string> BoneNameMapping = new Dictionary<string, string>()
-    {
-        // 根骨骼和躯干（Position→センター, Hip→グルーブ 与VMD默认导出一致）
-        { "Position", "センター" },
-        { "Hip", "グルーブ" },
-        { "Spine", "上半身" },
-        { "Chest", "上半身2" },
-        { "Neck", "首" },
-        { "Head", "頭" },
-        // 左肩・腕
-        { "Shoulder_L", "左肩" },
-        { "Arm_L", "左腕" },
-        { "Elbow_L", "左ひじ" },
-        { "Wrist_L", "左手首" },
-        // 右肩・腕
-        { "Shoulder_R", "右肩" },
-        { "Arm_R", "右腕" },
-        { "Elbow_R", "右ひじ" },
-        { "Wrist_R", "右手首" },
-        // 左手指
-        { "Thumb_01_L", "左親指０" },
-        { "Thumb_02_L", "左親指１" },
-        { "Thumb_03_L", "左親指２" },
-        { "Index_01_L", "左人指１" },
-        { "Index_02_L", "左人指２" },
-        { "Index_03_L", "左人指３" },
-        { "Middle_01_L", "左中指１" },
-        { "Middle_02_L", "左中指２" },
-        { "Middle_03_L", "左中指３" },
-        { "Ring_01_L", "左薬指１" },
-        { "Ring_02_L", "左薬指２" },
-        { "Ring_03_L", "左薬指３" },
-        { "Pinky_01_L", "左小指１" },
-        { "Pinky_02_L", "左小指２" },
-        { "Pinky_03_L", "左小指３" },
-        // 右手指
-        { "Thumb_01_R", "右親指０" },
-        { "Thumb_02_R", "右親指１" },
-        { "Thumb_03_R", "右親指２" },
-        { "Index_01_R", "右人指１" },
-        { "Index_02_R", "右人指２" },
-        { "Index_03_R", "右人指３" },
-        { "Middle_01_R", "右中指１" },
-        { "Middle_02_R", "右中指２" },
-        { "Middle_03_R", "右中指３" },
-        { "Ring_01_R", "右薬指１" },
-        { "Ring_02_R", "右薬指２" },
-        { "Ring_03_R", "右薬指３" },
-        { "Pinky_01_R", "右小指１" },
-        { "Pinky_02_R", "右小指２" },
-        { "Pinky_03_R", "右小指３" },
-        // 左足
-        { "Thigh_L", "左足" },
-        { "Knee_L", "左ひざ" },
-        { "Ankle_L", "左足首" },
-        { "Toe_L", "左足先EX" },
-        // 右足
-        { "Thigh_R", "右足" },
-        { "Knee_R", "右ひざ" },
-        { "Ankle_R", "右足首" },
-        { "Toe_R", "右足先EX" },
-        // 目
-        { "Eye_L", "左目" },
-        { "Eye_R", "右目" },
-        // 耳・口
-        { "Ear_01_L", "左耳" },
-        { "Ear_02_L", "左耳1" },
-        { "Ear_03_L", "左耳2" },
-        { "Ear_01_R", "右耳" },
-        { "Ear_02_R", "右耳1" },
-        { "Ear_03_R", "右耳2" },
-        { "Mouth", "口" },
-        { "Jaw", "顎" },
-    };
 
-    private static Bone[] ReadBones(List<Transform> bonelist)
-    {
-        List<Bone> pmxbones = new List<Bone>();
-
-        // 记录特殊骨骼索引，用于后续添加「下半身」虚拟骨骼
-        int hipIndex = -1;
-        int leftThighIndex = -1;
-        int rightThighIndex = -1;
-
-        // CySpring bone names overflow the VMD's 15-byte track-name field, so a baked motion
-        // could not address them. Shorten the PMX primary name for those bones only; NameEn
-        // below keeps the original. Built over the whole list so the result is unique.
-        var boneNameList = new List<string>(bonelist.Count);
-        foreach (var b in bonelist) boneNameList.Add(b.name);
-        var springShortNames = SpringBoneNames.BuildMap(boneNameList);
-
-        for (int i = 0; i < bonelist.Count; i++)
-        {
-            var bone = bonelist[i];
-            Bone pmxbone = new Bone();
-
-            // 应用骨骼名称映射：Unity英文名 → MMD日文名
-            if (BoneNameMapping.TryGetValue(bone.name, out string mappedName))
-            {
-                pmxbone.Name = mappedName;        // 日文名（MMD主名称）
-                pmxbone.NameEn = bone.name;       // 英文名（保留原始名称）
-            }
-            else if (springShortNames.TryGetValue(bone.name, out string shortName))
-            {
-                pmxbone.Name = shortName;         // fits a VMD track name
-                pmxbone.NameEn = bone.name;       // full CySpring name, for lookups and PMXEditor
-            }
-            else
-            {
-                pmxbone.Name = pmxbone.NameEn = bone.name;
-            }
-
-            pmxbone.Position = bone.position;
-            // Skip filtered-out ancestors/children so the hierarchy stays intact
-            // after control bones are removed.
-            pmxbone.ParentIndex = bone.parent != null ? NearestKeptBone(bonelist, bone.parent) : -1;
-            pmxbone.TransformLevel = 0;
-            pmxbone.Visible = true;
-            pmxbone.Movable = true;
-            pmxbone.Rotatable = true;
-            pmxbone.Controllable = true;
-            pmxbone.ChildBoneVal = new Bone.ChildBone()
-            {
-                ChildUseId = true,
-                Index = FirstKeptDescendant(bonelist, bone)
-            };
-            pmxbones.Add(pmxbone);
-
-            // 记录关键骨骼索引
-            if (bone.name == "Hip") hipIndex = i;
-            if (bone.name == "Thigh_L") leftThighIndex = i;
-            if (bone.name == "Thigh_R") rightThighIndex = i;
-        }
-
-        // [Fix] Enforce Chin -> Tongue -> Tongue_Out chain
-        // User requested explicit structure optimization: Chin -> Tongue -> Tongue_Out_01 -> Tongue_Out_02
-        
-        int chinIndex = pmxbones.FindIndex(b => b.NameEn == "Chin");
-        if (chinIndex == -1) chinIndex = pmxbones.FindIndex(b => b.NameEn.StartsWith("Jaw"));
-
-        if (chinIndex >= 0)
-        {
-            // 1. Link Root "Tongue" to Chin
-            int tongueIndex = pmxbones.FindIndex(b => b.NameEn == "Tongue");
-            if (tongueIndex >= 0)
-            {
-                pmxbones[tongueIndex].ParentIndex = chinIndex;
-
-                // 2. Link "Tongue_Out_01" to "Tongue"
-                int tongueOut01Index = pmxbones.FindIndex(b => b.NameEn == "Tongue_Out_01");
-                if (tongueOut01Index >= 0)
-                {
-                    pmxbones[tongueOut01Index].ParentIndex = tongueIndex;
-
-                    // 3. Link "Tongue_Out_02" to "Tongue_Out_01"
-                    int tongueOut02Index = pmxbones.FindIndex(b => b.NameEn == "Tongue_Out_02");
-                    if (tongueOut02Index >= 0)
-                    {
-                        pmxbones[tongueOut02Index].ParentIndex = tongueOut01Index;
-                    }
-                }
-            }
-            else
-            {
-                // Fallback: If no single "Tongue" bone, try to find "Tongue_01" or similar valid roots
-                for (int i = 0; i < pmxbones.Count; i++)
-                {
-                   if (pmxbones[i].NameEn.StartsWith("Tongue") && !pmxbones[i].NameEn.Contains("Out"))
-                   {
-                        // Treat as root tongue
-                        pmxbones[i].ParentIndex = chinIndex;
-                   }
-                }
-            }
-        }
-
-        // 添加「下半身」虚拟骨骼 — MMD标准骨骼中必须存在
-        // Uma模型没有独立的下半身骨骼，此骨骼位于Hip位置，作为大腿的父骨骼
-        if (hipIndex >= 0)
-        {
-            int lowerBodyIndex = pmxbones.Count;
-            Bone lowerBody = new Bone();
-            lowerBody.Name = "下半身";
-            lowerBody.NameEn = "LowerBody";
-            lowerBody.Position = pmxbones[hipIndex].Position; // 与グルーブ同位置
-            lowerBody.ParentIndex = hipIndex;                  // 父骨骼为グルーブ(Hip)
-            lowerBody.TransformLevel = 0;
-            lowerBody.Visible = true;
-            lowerBody.Movable = true;
-            lowerBody.Rotatable = true;
-            lowerBody.Controllable = true;
-            lowerBody.ChildBoneVal = new Bone.ChildBone()
-            {
-                ChildUseId = true,
-                Index = leftThighIndex >= 0 ? leftThighIndex : -1
-            };
-            pmxbones.Add(lowerBody);
-
-            // 将左右大腿的父骨骼从グルーブ(Hip)改为下半身
-            if (leftThighIndex >= 0)
-                pmxbones[leftThighIndex].ParentIndex = lowerBodyIndex;
-            if (rightThighIndex >= 0)
-                pmxbones[rightThighIndex].ParentIndex = lowerBodyIndex;
-        }
-
-        return pmxbones.ToArray();
-    }
 
     private static Part[] ReadPartMaterials(List<Renderer> renderers, RawMMDModel model)
     {
@@ -790,7 +540,7 @@ public class ModelExporter
         return parts.ToArray();
     }
 
-    private static Vertex[] ReadVerticesAndTriangles(List<Renderer> renderers, List<Transform> bones, ref List<int> triangleList, Transform root)
+    private static Vertex[] ReadVerticesAndTriangles(List<Renderer> renderers, PMXBoneExporter.Result bones, ref List<int> triangleList, Transform root)
     {
         List<Vertex> verticesList = new List<Vertex>();
         int vertexOffset = 0;
@@ -838,7 +588,7 @@ public class ModelExporter
                     };
 
                     vertex.SkinningOperator = new SkinningOperator() { Type = SkinningType.SkinningBdef1 };
-                    vertex.SkinningOperator.Param = new Bdef1() { BoneId = bones.IndexOf(renderer.transform) };
+                    vertex.SkinningOperator.Param = new Bdef1() { BoneId = bones.LookUp(renderer.transform) };
                     vertex.EdgeScale = 1;
                     verticesList.Add(vertex);
                 }
@@ -899,13 +649,13 @@ public class ModelExporter
                     {
                         case 0:
                             vertex.SkinningOperator = new SkinningOperator() { Type = SkinningType.SkinningBdef1 };
-                            vertex.SkinningOperator.Param = new Bdef1() { BoneId = GetBoneIndex(bones, renderer.transform) };
+                            vertex.SkinningOperator.Param = new Bdef1() { BoneId = bones.LookUp(renderer.transform) };
                             break;
 
                         default:
                         case 1:
                             vertex.SkinningOperator = new SkinningOperator() { Type = SkinningType.SkinningBdef1 };
-                            vertex.SkinningOperator.Param = new Bdef1() { BoneId = GetBoneIndex(bones, skinbone[boneWeight.boneIndex0]) };
+                            vertex.SkinningOperator.Param = new Bdef1() { BoneId = bones.LookUp(skinbone[boneWeight.boneIndex0]) };
                             break;
 
                         case 2:
@@ -913,8 +663,8 @@ public class ModelExporter
                             vertex.SkinningOperator.Param = new Bdef2()
                             {
                                 BoneId = new int[]{
-                                    GetBoneIndex(bones, skinbone[boneWeight.boneIndex0]),
-                                    GetBoneIndex(bones, skinbone[boneWeight.boneIndex1]),
+                                    bones.LookUp(skinbone[boneWeight.boneIndex0]),
+                                    bones.LookUp(skinbone[boneWeight.boneIndex1]),
                                 },
                                 BoneWeight = boneWeight.weight0
                             };
@@ -926,10 +676,10 @@ public class ModelExporter
                             vertex.SkinningOperator.Param = new Bdef4()
                             {
                                 BoneId = new int[]{
-                                    GetBoneIndex(bones, skinbone[boneWeight.boneIndex0]),
-                                    GetBoneIndex(bones, skinbone[boneWeight.boneIndex1]),
-                                    GetBoneIndex(bones, skinbone[boneWeight.boneIndex2]),
-                                    GetBoneIndex(bones, skinbone[boneWeight.boneIndex3]),
+                                    bones.LookUp(skinbone[boneWeight.boneIndex0]),
+                                    bones.LookUp(skinbone[boneWeight.boneIndex1]),
+                                    bones.LookUp(skinbone[boneWeight.boneIndex2]),
+                                    bones.LookUp(skinbone[boneWeight.boneIndex3]),
                                 },
                                 BoneWeight = new float[]
                                 {
@@ -955,112 +705,57 @@ public class ModelExporter
         return verticesList.ToArray();
     }
 
-    // babylon-mmd and strict MMD loaders require a bone's parent to precede it. The
-    // virtual 下半身 is appended last but parents the thighs, so move it to just after
-    // Hip and remap every bone/vertex index so parents come first.
-    private static void ReorderLowerBody(RawMMDModel model)
+    // Display frames (表示枠). MMD lists bones and morphs only through these. The writer adds
+    // the Root frame holding bone 0 (全ての親); 表情 holds every morph; every other bone lands
+    // in a standard group, スプリング for CySpring bones, or その他.
+    private static void BuildDisplayFrames(RawMMDModel model)
     {
-        var bones = model.Bones;
-        int n = bones.Length;
-        int src = Array.FindIndex(bones, b => b.NameEn == "LowerBody");
-        int anchor = Array.FindIndex(bones, b => b.NameEn == "Hip");
-        if (src < 0 || anchor < 0 || src == anchor + 1) return;
+        model.Entrys.Clear();
 
-        var order = new List<int>(n);
-        for (int i = 0; i < n; i++)
+        var morphFrame = new PMXEntryItem { EntryItemName = "表情", EntryItemNameEn = "Exp", IsSpecial = true, Elements = new List<PMXEntryItem.Element>() };
+        for (int i = 0; i < model.Morphs.Length; i++)
+            morphFrame.Elements.Add(new PMXEntryItem.Element { IsMorph = true, MorphIndex = i });
+        model.Entrys.Add(morphFrame);
+
+        var byName = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (int i = 0; i < model.Bones.Length; i++)
+            if (!byName.ContainsKey(model.Bones[i].Name)) byName[model.Bones[i].Name] = i;
+        var placed = new HashSet<int> { 0 };
+
+        void Frame(string name, string nameEn, IEnumerable<int> indices)
         {
-            if (i == src) continue;
-            order.Add(i);
-            if (i == anchor) order.Add(src);
+            var frame = new PMXEntryItem { EntryItemName = name, EntryItemNameEn = nameEn, IsSpecial = false, Elements = new List<PMXEntryItem.Element>() };
+            foreach (int i in indices)
+                if (placed.Add(i)) frame.Elements.Add(new PMXEntryItem.Element { IsMorph = false, BoneIndex = i });
+            if (frame.Elements.Count > 0) model.Entrys.Add(frame);
         }
-        var map = new int[n];
-        for (int newIdx = 0; newIdx < order.Count; newIdx++) map[order[newIdx]] = newIdx;
-
-        var reordered = new Bone[n];
-        for (int newIdx = 0; newIdx < order.Count; newIdx++) reordered[newIdx] = bones[order[newIdx]];
-        foreach (var b in reordered)
+        IEnumerable<int> Named(params string[] names)
         {
-            if (b.ParentIndex >= 0) b.ParentIndex = map[b.ParentIndex];
-            if (b.ChildBoneVal != null && b.ChildBoneVal.Index >= 0) b.ChildBoneVal.Index = map[b.ChildBoneVal.Index];
-            if (b.IkInfoVal != null)
-            {
-                if (b.IkInfoVal.IkTargetIndex >= 0) b.IkInfoVal.IkTargetIndex = map[b.IkInfoVal.IkTargetIndex];
-                if (b.IkInfoVal.IkLinks != null)
-                    foreach (var lk in b.IkInfoVal.IkLinks)
-                        if (lk.LinkIndex >= 0) lk.LinkIndex = map[lk.LinkIndex];
-            }
-        }
-        model.Bones = reordered;
-
-        foreach (var v in model.Vertices)
-            RemapSkinBones(v.SkinningOperator, map);
-    }
-
-    private static void RemapSkinBones(SkinningOperator op, int[] map)
-    {
-        int Fix(int idx) => (idx >= 0 && idx < map.Length) ? map[idx] : idx;
-        switch (op.Param)
-        {
-            case Bdef1 b: b.BoneId = Fix(b.BoneId); break;
-            case Bdef2 b: for (int i = 0; i < b.BoneId.Length; i++) b.BoneId[i] = Fix(b.BoneId[i]); break;
-            case Bdef4 b: for (int i = 0; i < b.BoneId.Length; i++) b.BoneId[i] = Fix(b.BoneId[i]); break;
-            case Sdef b:  for (int i = 0; i < b.BoneId.Length; i++) b.BoneId[i] = Fix(b.BoneId[i]); break;
-        }
-    }
-
-    // Blender control-rig bones: IK handles/poles/targets and zero-length offset bones.
-    private static bool IsControlBone(string n)
-    {
-        return n.Contains("_Handle") || n.Contains("_offset")
-            || n.EndsWith("_Pole") || n.EndsWith("_Target");
-    }
-
-    // Nearest ancestor (self excluded) that survived filtering, or -1 for the root.
-    private static int NearestKeptBone(List<Transform> bones, Transform bone)
-    {
-        for (Transform cur = bone; cur != null; cur = cur.parent)
-        {
-            int idx = bones.IndexOf(cur);
-            if (idx >= 0) return idx;
-        }
-        return -1;
-    }
-
-    // First kept bone in a depth-first walk of this bone's descendants (display link).
-    private static int FirstKeptDescendant(List<Transform> bones, Transform bone)
-    {
-        foreach (Transform child in bone)
-        {
-            int idx = bones.IndexOf(child);
-            if (idx >= 0) return idx;
-            int deep = FirstKeptDescendant(bones, child);
-            if (deep >= 0) return deep;
-        }
-        return -1;
-    }
-
-    private static int GetBoneIndex(List<Transform> bones, Transform bone)
-    {
-        // Check if bone is in the list
-        if (bones.Contains(bone))
-        {
-            return bones.IndexOf(bone);
-        }
-        
-        // If not found (e.g. filtered out), try to find a parent that IS in the list
-        // This ensures weights are transferred to the parent (e.g. Head) instead of Root
-        Transform current = bone.parent;
-        while (current != null)
-        {
-            if (bones.Contains(current))
-            {
-                return bones.IndexOf(current);
-            }
-            current = current.parent;
+            foreach (var n in names) if (byName.TryGetValue(n, out int i)) yield return i;
         }
 
-        // Fallback to 0 (Root) if no parent found
-        return 0;
+        Frame("センター", "Center", Named("センター", "グルーブ"));
+        Frame("ＩＫ", "IK", Named("左足IK親", "右足IK親", "左足ＩＫ", "右足ＩＫ", "左つま先ＩＫ", "右つま先ＩＫ"));
+        Frame("体(上)", "Body[u]", Named("上半身", "上半身2", "首", "頭", "両目", "左目", "右目"));
+        Frame("腕", "Arms", Named("左肩", "左腕", "左手捩", "左ひじ", "左手首", "右肩", "右腕", "右手捩", "右ひじ", "右手首", "ダミー.L", "ダミー.R"));
+        Frame("指", "Fingers", Named(
+            "左親指０", "左親指１", "左親指２", "左人指１", "左人指２", "左人指３", "左中指１", "左中指２", "左中指３",
+            "左薬指１", "左薬指２", "左薬指３", "左小指１", "左小指２", "左小指３",
+            "右親指０", "右親指１", "右親指２", "右人指１", "右人指２", "右人指３", "右中指１", "右中指２", "右中指３",
+            "右薬指１", "右薬指２", "右薬指３", "右小指１", "右小指２", "右小指３"));
+        Frame("体(下)", "Body[l]", Named("腰", "下半身"));
+        Frame("足", "Legs", Named("左足", "左ひざ", "左足首", "左足先EX", "右足", "右ひざ", "右足首", "右足先EX"));
+        Frame("耳", "Ears", Named("左耳", "左耳1", "左耳2", "右耳", "右耳1", "右耳2"));
+        Frame("顔", "Face", Named("口", "顎"));
+
+        var spring = new List<int>(); var other = new List<int>();
+        for (int i = 0; i < model.Bones.Length; i++)
+        {
+            if (placed.Contains(i)) continue;
+            (SpringBoneNames.IsSpringBone(model.Bones[i].NameEn) ? spring : other).Add(i);
+        }
+        Frame("スプリング", "Spring", spring);
+        Frame("その他", "Other", other);
     }
 
     /// <summary> Credit to pohype: https://discussions.unity.com/t/reading-meshes-at-runtime-that-are-not-enabled-for-read-write/804189/7 </summary>

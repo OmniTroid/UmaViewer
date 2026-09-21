@@ -341,8 +341,13 @@ namespace LibMMD.Writer
                 writer.Write(link.HasLimit ? (byte)1 : (byte)0);
                 if (link.HasLimit)
                 {
-                    MMDReaderWriteUtil.WriteVector3(writer, link.LoLimit, false);
-                    MMDReaderWriteUtil.WriteVector3(writer, link.HiLimit, false);
+                    // Angle limits about the bone axes. Positions reach the PMX frame through a
+                    // half-turn about Y (x and z negated), which maps an interval on X or Z to its
+                    // negation, so those components negate AND swap between low and high -- the
+                    // same as joint limits.
+                    var lo = link.LoLimit; var hi = link.HiLimit;
+                    MMDReaderWriteUtil.WritePlainVector3(writer, new Vector3(-hi.x, lo.y, -hi.z));
+                    MMDReaderWriteUtil.WritePlainVector3(writer, new Vector3(-lo.x, hi.y, -lo.z));
                 }
             }
         }

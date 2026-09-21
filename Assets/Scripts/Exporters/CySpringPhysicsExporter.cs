@@ -90,6 +90,10 @@ public static class CySpringPhysicsExporter
             {
                 int b = stack.Pop();
                 if (rootSet.Contains(b)) continue;
+                // Only CySpring bones are cloth. Animated bones that hang under a spring root
+                // (the ear chain under Sp_He_Ear0) are driven by their own VMD tracks and get
+                // no body -- and nothing below them does either.
+                if (!SpringBoneNames.IsSpringBone(model.Bones[b].NameEn)) continue;
                 P p = param.TryGetValue(model.Bones[b].NameEn, out var pp) ? pp : new P { drag = 0.4f, stiff = 3f, radius = 0.02f, limited = false };
                 bodyOf[b] = AddBody(bodies, model, b, false, p);
                 int par = model.Bones[b].ParentIndex;
