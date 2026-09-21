@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Zip a built player as dist/UmaViewer-<platform>-<sha>.zip. Build first with tools/build-<x>.sh.
+# Build a release player and zip it as dist/UmaViewer-<platform>-<sha>.zip.
 # Usage: tools/package.sh windows|mac|web
 set -euo pipefail
 
@@ -8,31 +8,30 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"
 
 case "$PLATFORM" in
-  # Candidate output dirs: local build script first, then the game-ci path used in CI.
-  windows) CANDS=(Build/Windows build/StandaloneWindows64); MODE=contents; BUILD=tools/build-win.sh ;;
-  mac)     CANDS=(Build/UmaViewer.app build/StandaloneOSX/UmaViewer.app); MODE=self; BUILD=tools/build-mac.sh ;;
-  web)     CANDS=(Build/Web build/WebGL/WebGL); MODE=contents; BUILD=tools/build-web.sh ;;
+  # Standalone players are already release builds; only WebGL has a --release toggle.
+  windows) BUILD=(tools/build-win.sh);           OUT="Build/Windows";       MODE=contents ;;
+  mac)     BUILD=(tools/build-mac.sh);           OUT="Build/UmaViewer.app";  MODE=self ;;
+  web)     BUILD=(tools/build-web.sh --release); OUT="Build/Web";            MODE=contents ;;
   *) echo "Usage: tools/package.sh windows|mac|web"; exit 2 ;;
 esac
 
-# Package only a clean commit, so the SHA in the name matches exactly what was built.
-[ -z "$(git status --porcelain)" ] || { echo "Working tree is dirty. Commit or stash before packaging."; exit 1; }
+# Release from a clean commit, so the SHA baked into the build and used in the name is meaningful.
+[ -z "$(git status --porcelain)" ] || { echo "Working tree is dirty. Commit or stash before releasing."; exit 1; }
 command -v zip >/dev/null 2>&1 || { echo "'zip' is required but not found."; exit 1; }
 
-SRC=""
-for c in "${CANDS[@]}"; do [ -e "$c" ] && SRC="$c" && break; done
-[ -n "$SRC" ] || { echo "No build found (looked in: ${CANDS[*]}). Run $BUILD first."; exit 1; }
+bash "${BUILD[@]}"
+[ -e "$OUT" ] || { echo "Build did not produce $OUT."; exit 1; }
 
 SHA="$(git rev-parse --short=7 HEAD)"
-OUT="$REPO/dist/UmaViewer-$PLATFORM-$SHA.zip"
+DEST="$REPO/dist/UmaViewer-$PLATFORM-$SHA.zip"
 mkdir -p "$REPO/dist"
-rm -f "$OUT"
+rm -f "$DEST"
 
 # -y keeps symlinks as symlinks (the mac .app bundle needs them).
 if [ "$MODE" = contents ]; then
-  (cd "$SRC" && zip -r -y -q "$OUT" .)
+  (cd "$OUT" && zip -r -y -q "$DEST" .)
 else
-  (cd "$(dirname "$SRC")" && zip -r -y -q "$OUT" "$(basename "$SRC")")
+  (cd "$(dirname "$OUT")" && zip -r -y -q "$DEST" "$(basename "$OUT")")
 fi
 
-echo "Packaged -> dist/UmaViewer-$PLATFORM-$SHA.zip"
+echo "Released -> dist/UmaViewer-$PLATFORM-$SHA.zip"
