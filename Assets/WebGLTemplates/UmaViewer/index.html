@@ -98,16 +98,21 @@
       // the canvas client size, so don't pin it to the fixed build WIDTH/HEIGHT here.
 
       function boot() {
-        document.querySelector("#uma-gate").remove();
+        // Keep the dark gate as a loading screen with a live percentage until Unity is ready.
+        // Otherwise the blank white canvas shows for the seconds it takes to fetch/decompress the
+        // data and instantiate the wasm, which reads as a long white hang on refresh.
+        var gate = document.querySelector("#uma-gate");
+        gate.innerHTML = '<h1>Loading…</h1><p id="uma-load-pct">0%</p>';
         container.hidden = false;
-        loadingBar.style.display = "block";
         var script = document.createElement("script");
         script.src = loaderUrl;
         script.onload = () => {
           createUnityInstance(canvas, config, (progress) => {
-            progressBarFull.style.width = 100 * progress + "%";
+            var pct = document.getElementById("uma-load-pct");
+            if (pct) pct.textContent = Math.round(progress * 100) + "%";
           }).then((unityInstance) => {
-            loadingBar.style.display = "none";
+            window.__umaUnity = unityInstance;
+            gate.remove();
           }).catch((message) => {
             unityShowBanner(message, 'error');
           });
