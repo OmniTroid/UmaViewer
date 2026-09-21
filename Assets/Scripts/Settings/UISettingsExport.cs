@@ -295,8 +295,13 @@ public class UISettingsExport : MonoBehaviour
         yield return MotionExporter.RunSafe(
             MotionExporter.Record(container, target, vmdPath, container.name, new MotionExporter.Options()), e => err = e);
 
-        if (part != Part.Loop) container.LoadAnimation(loaded);   // Record left the _s/_e clip in the slot
-        UI.LoadedAnimation();                             // reapply the panel's speed setting
+        // Whatever happened, the panel comes back: a throw here would leave every button greyed.
+        try
+        {
+            if (part != Part.Loop) container.LoadAnimation(loaded);   // Record left the _s/_e clip in the slot
+            UI.LoadedAnimation();                                       // reapply the panel's speed setting
+        }
+        catch (Exception ex) { Debug.LogException(ex); }
         SetBusy(false, button, label);
         describedClip = null;                             // re-probe: buttons back to the loaded animation's state
         if (err != null)
