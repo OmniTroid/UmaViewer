@@ -28,7 +28,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
 def main():
     if not os.path.isdir(ROOT):
-        sys.exit(f"No build at {ROOT}. Run tools/build-web.sh first.")
+        sys.exit(f"No build at {ROOT}. Run tools/build.sh web first.")
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
     with socketserver.TCPServer(("", port), Handler) as httpd:
         print(f"Serving {ROOT} at http://localhost:{port}")

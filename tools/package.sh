@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build a release player and zip it as dist/UmaViewer-<platform>-<sha>.zip.
-# Web is deployed (tools/deploy-pages.sh), not packaged. Usage: tools/package.sh windows|mac
+# Web is deployed (tools/deploy-pages.sh), not packaged. Usage: tools/package.sh win|mac
 set -euo pipefail
 
 PLATFORM="${1:-}"
@@ -8,9 +8,9 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"
 
 case "$PLATFORM" in
-  windows) BUILD=(tools/build-win.sh --release); OUT="Build/Windows";       MODE=contents ;;
-  mac)     BUILD=(tools/build-mac.sh --release); OUT="Build/UmaViewer.app";  MODE=self ;;
-  *) echo "Usage: tools/package.sh windows|mac"; exit 2 ;;
+  win) BUILD=(tools/build.sh win --release); OUT="Build/Windows";       MODE=contents ;;
+  mac) BUILD=(tools/build.sh mac --release); OUT="Build/UmaViewer.app";  MODE=self ;;
+  *) echo "Usage: tools/package.sh win|mac"; exit 2 ;;
 esac
 
 # Release from a clean commit, so the SHA baked into the build and used in the name is meaningful.

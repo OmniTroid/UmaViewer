@@ -81,7 +81,7 @@ jobs:
         shell: pwsh
         run: |
           $sha = "$env:GITHUB_SHA".Substring(0, 7)
-          $zip = "dist/UmaViewer-windows-$sha.zip"
+          $zip = "dist/UmaViewer-win-$sha.zip"
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Compress-Archive -Path "build/StandaloneWindows64/*" -DestinationPath $zip -CompressionLevel Optimal
           "zip=$zip" >> $env:GITHUB_OUTPUT
@@ -89,7 +89,7 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: UmaViewer-windows
+          name: UmaViewer-win
           path: ${{ steps.package.outputs.zip }}
           if-no-files-found: error
           retention-days: 14

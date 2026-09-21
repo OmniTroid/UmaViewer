@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Publish the prebuilt Build/Web to a gh-pages branch (root) for GitHub Pages.
-# Build first with tools/build-web.sh. Usage: tools/deploy-pages.sh [remote] [branch]
+# Build first with tools/build.sh web. Usage: tools/deploy-pages.sh [remote] [branch]
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -9,7 +9,7 @@ REMOTE="${1:-$(git -C "$REPO" remote | grep -qx origin && echo origin || git -C 
 BRANCH="${2:-gh-pages}"
 WORKTREE="$(mktemp -d)"
 
-[ -f "$BUILD/index.html" ] || { echo "No build at $BUILD. Run tools/build-web.sh first."; exit 1; }
+[ -f "$BUILD/index.html" ] || { echo "No build at $BUILD. Run tools/build.sh web first."; exit 1; }
 [ -n "$REMOTE" ] || { echo "No git remote found."; exit 1; }
 
 cleanup() {

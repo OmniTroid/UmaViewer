@@ -43,7 +43,7 @@ if [ -z "$BIN" ]; then
     if [ -e "$c" ]; then BIN="$c"; break; fi
   done
 fi
-[ -n "$BIN" ] || { echo "UmaViewer player not found; build it (tools/build-mac.sh or build-win.sh) or set UMAVIEWER_BIN"; exit 1; }
+[ -n "$BIN" ] || { echo "UmaViewer player not found; build it (tools/build.sh mac or tools/build.sh win) or set UMAVIEWER_BIN"; exit 1; }
 # Probe rather than trust the first hit: on Windows, python3 usually resolves to the
 # Microsoft Store alias stub, which exists on PATH but exits with "Python was not found"
 # instead of running anything.

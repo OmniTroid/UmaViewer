@@ -5,7 +5,7 @@ Headless CLI (`Assets/Scripts/CliExporter.cs`, enabled by `--export`) that write
 
 ## Prerequisites
 
-- A built player. macOS: `tools/build-mac.sh` → `Build/UmaViewer.app`. Windows: `tools/build-win.sh` → `Build/Windows/UmaViewer.exe` (needs the "Windows Build Support (Mono)" editor module), or the CI IL2CPP artifact from `.github/workflows/build.yml`.
+- A built player. macOS: `tools/build.sh mac` → `Build/UmaViewer.app`. Windows: `tools/build.sh win` → `Build/Windows/UmaViewer.exe` (needs the "Windows Build Support (Mono)" editor module), or the CI IL2CPP artifact from `.github/workflows/build.yml`.
 - A game data folder (the `Persistent` directory) with the encrypted `meta` DB and asset bundles.
 - Run with `-batchmode` but **not** `-nographics`: a null GPU device loads no meshes/textures.
 

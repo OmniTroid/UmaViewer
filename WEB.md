@@ -7,7 +7,7 @@ Compile UmaViewer to a hostable WebGL page. WebGL is IL2CPP-only (already the St
 Needs the "WebGL Build Support" editor module (Unity Hub → add modules).
 
 ```
-bash tools/build-web.sh      # build -> Build/Web/ (Assets/Editor/HeadlessWebBuild.cs)
+bash tools/build.sh web         # build -> Build/Web/ (Assets/Editor/HeadlessWebBuild.cs)
 python3 tools/serve-web.py   # serve  -> http://localhost:8000
 ```
 

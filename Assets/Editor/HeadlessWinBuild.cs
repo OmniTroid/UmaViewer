@@ -8,7 +8,7 @@ public static class HeadlessWinBuild
 {
     public static void BuildMono()
     {
-        // --release (tools/build-win.sh --release) builds a plain release player; the default is
+        // --release (tools/build.sh win --release) builds a plain release player; the default is
         // a Development build (profiler + script debugging) for local iteration.
         bool release = Environment.GetCommandLineArgs().Contains("--release");
         var group = BuildTargetGroup.Standalone;

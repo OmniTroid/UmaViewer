@@ -8,7 +8,7 @@ public static class HeadlessMacBuild
 {
     public static void BuildMono()
     {
-        // --release (tools/build-mac.sh --release) builds a plain release player; the default is
+        // --release (tools/build.sh mac --release) builds a plain release player; the default is
         // a Development build (profiler + script debugging) for local iteration.
         bool release = Environment.GetCommandLineArgs().Contains("--release");
         var group = BuildTargetGroup.Standalone;

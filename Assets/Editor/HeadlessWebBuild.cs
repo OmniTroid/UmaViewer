@@ -8,7 +8,7 @@ public static class HeadlessWebBuild
 {
     // WebGL only supports IL2CPP, so there's no backend to switch (unlike the mac/win Mono
     // builds). Outputs a hostable folder: Build/Web/index.html + Build/Web/Build/*.
-    // --release (tools/build-web.sh --release) makes a lean prod build; the default is a
+    // --release (tools/build.sh web --release) makes a lean prod build; the default is a
     // debug-friendly build with full stack traces.
     public static void Build()
     {
