@@ -120,8 +120,8 @@ solver's own output, for comparing against whatever a runtime produces from the 
 `--spring-dump F` writes the raw per-bone CySpring parameters. Both need the real
 `CySpringPlugin.dll`, so run them on Windows.
 
-The native solver scales the raw asset values — `StiffnessForce/100`, `DragForce/1000`,
-`Gravity/10000` — with the constants recovered from the DLL in `native/CySpring/CySpringPlugin.cpp`.
+The solver scales the raw asset values — `StiffnessForce/1000`, `DragForce/100`,
+`Gravity/10000` (constants at `0x18008ec8c`, `0x18008ec80`, `0x18008ec90` in `CySpringPlugin.dll`).
 Read the raw fields without those divisors and the numbers are meaningless: on chr1127 they run
 130..700 and 200..1050.
 
