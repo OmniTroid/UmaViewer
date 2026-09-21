@@ -6,7 +6,10 @@ namespace Gallop
 {
     public struct CySpringNative
     {
-#if (UNITY_IOS || UNITY_IPHONE) && !UNITY_EDITOR
+#if (UNITY_IOS || UNITY_IPHONE || UNITY_WEBGL) && !UNITY_EDITOR
+        // WebGL never calls these (isNative is false there; the managed CySpringSolver runs),
+        // but the P/Invoke symbols must still resolve at link -- Assets/Plugins/WebGL/CySpring.jslib
+        // provides no-op stubs.
         private const string DLL_NAME = "__Internal";
 #else
         private const string DLL_NAME = "CySpringPlugin";
