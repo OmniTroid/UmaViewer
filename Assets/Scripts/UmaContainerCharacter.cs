@@ -1762,6 +1762,11 @@ public class UmaContainerCharacter : UmaContainer
     public void LoadTear(UmaDatabaseEntry entry)
     {
         GameObject go = entry.Get<GameObject>();
+        if (go == null)
+        {
+            Debug.LogWarning($"[LoadTear] null prefab for '{entry?.Name}'; skipping");
+            return;
+        }
         if (go.name.EndsWith("000"))
         {
             TearPrefab_0 = go;
@@ -1963,6 +1968,13 @@ public class UmaContainerCharacter : UmaContainer
         }
 
         var aClip = entry.Get<AnimationClip>();
+        // WebGL: the clip's bundle may not be faulted in yet (callers should mount it first).
+        // Skip rather than NRE if it's still missing.
+        if (aClip == null)
+        {
+            Debug.LogWarning($"[LoadAnimation] null clip for '{entry?.Name}'; skipping");
+            return;
+        }
 
         if (UmaAnimator)
         {
@@ -2261,6 +2273,13 @@ public class UmaContainerCharacter : UmaContainer
         var locatorEntry = Main.AbList["3d/animator/drivenkeylocator"];
         LoadedAssets.Add(locatorEntry);
         var bundle = UmaAssetManager.LoadAssetBundle(locatorEntry);
+        // WebGL: an unmounted common bundle loads as null. DrivenKeyLocator is required for the
+        // facial rig, so bail out of the face morph rather than NRE the whole load.
+        if (bundle == null)
+        {
+            Debug.LogWarning("[LoadFaceMorph] drivenkeylocator bundle null; skipping face morph");
+            return;
+        }
         var locator = Instantiate(bundle.LoadAsset("DrivenKeyLocator"), transform) as GameObject;
         locator.name = "DrivenKeyLocator";
 
@@ -2280,7 +2299,14 @@ public class UmaContainerCharacter : UmaContainer
         {
             LoadedAssets.Add(entry);
             AssetBundle ab = UmaAssetManager.LoadAssetBundle(entry);
-            var obj = ab.LoadAsset(Path.GetFileNameWithoutExtension(entry.Name)) as GameObject;
+            // WebGL faults shared emotion effect bundles in asynchronously; skip any that missed
+            // rather than NRE. The eye-emotion effect just won't show for this load.
+            var obj = ab ? ab.LoadAsset(Path.GetFileNameWithoutExtension(entry.Name)) as GameObject : null;
+            if (obj == null)
+            {
+                Debug.LogWarning($"[LoadFaceMorph] emotion bundle null for '{entry?.Name}'; skipping");
+                return;
+            }
             obj.SetActive(false);
 
             var leftObj = Instantiate(obj, eyeLocator_L.transform);

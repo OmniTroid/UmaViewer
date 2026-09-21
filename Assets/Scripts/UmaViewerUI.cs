@@ -1202,9 +1202,29 @@ public class UmaViewerUI : MonoBehaviour
         container.Button.onClick.AddListener(() =>
         {
             HighlightChildImage(parent, container);
-            (Builder.CurrentUMAContainer)?.LoadAnimation(entry);
-            LoadedAnimation();
+            StartCoroutine(LoadAnimationRoutine(entry));
         });
+    }
+
+    IEnumerator LoadAnimationRoutine(UmaDatabaseEntry entry)
+    {
+        // WebGL faults bundle files in on demand; mount the clip and its dependencies before the
+        // synchronous LoadAnimation reads them (instant no-op on other platforms). Show the shared
+        // loading panel across the mount so the model isn't a silent T-pose while it fetches.
+        if (WebFileMount.Active && entry != null)
+        {
+            var scene = UmaSceneController.instance;
+            var requests = UmaAssetManager.SearchAB(UmaViewerMain.Instance, entry);
+            for (int i = 0; i < requests.Count; i++)
+            {
+                scene?.LoadingProgressChange(i, requests.Count, "Loading Animation");
+                if (requests[i] != null)
+                    yield return WebFileMount.Ensure(requests[i].Path);
+            }
+            scene?.LoadingProgressChange(-1, -1);
+        }
+        (Builder.CurrentUMAContainer)?.LoadAnimation(entry);
+        LoadedAnimation();
     }
 
     string getCharaName(string id)
