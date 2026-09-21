@@ -191,7 +191,7 @@ public class UISettingsExport : MonoBehaviour
             Debug.LogException(err);
             UI.ShowMessage("Export failed: " + err.Message, UIMessageType.Error);
         }
-        else UI.ShowMessage($"Saved {vmdPath}", UIMessageType.Success);
+        else UI.ShowMessage($"Saved {vmdPath}" + (File.Exists(MotionExporter.CameraPathFor(vmdPath)) ? $" and {Path.GetFileName(MotionExporter.CameraPathFor(vmdPath))}" : ""), UIMessageType.Success);
 #else
         UI.ShowMessage("Not supported on this platform", UIMessageType.Warning);
         yield break;

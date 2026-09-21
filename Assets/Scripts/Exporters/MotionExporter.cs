@@ -39,8 +39,9 @@ public static class MotionExporter
         public bool DropMouth = false;
         /// Replace any blink track with one periodic blink over the loop.
         public bool AddBlink = false;
-        /// When the motion has a scripted camera (_cam companion), record it into the same
-        /// VMD's camera section. Only one-shots and some transitions have one; loops never do.
+        /// When the motion has a scripted camera (_cam companion), record it as a camera VMD
+        /// of its own next to the motion file (<motion>_camera.vmd, model name カメラ・照明,
+        /// as MMD camera motions are distributed). Loops never have one.
         public bool IncludeCamera = true;
         /// A card cut-in names one cut of a chain (..._01, _02, ...). Record the whole chain from
         /// this cut to the last, the way the viewer plays it, into one VMD.
@@ -378,13 +379,16 @@ public static class MotionExporter
                 // then the transient frame 0 is dropped and everything shifts down by one; a loop
                 // keeps only one period.
                 int keep = opt.RecordSeconds > 0f ? int.MaxValue : chain ? Mathf.RoundToInt(chainLen * 30f) : Mathf.RoundToInt(len * 30f);
+                var records = new List<byte[]>();
                 for (int k = 0; k < camSamples.Count; k += rec.WriteStride)
                 {
                     int j = k / rec.WriteStride;
                     if (j < 1 || j > keep) continue;
-                    rec.CameraFrames.Add(camSamples[k].ToVmdRecord(j - 1));
+                    records.Add(camSamples[k].ToVmdRecord(j - 1));
                 }
-                Debug.Log($"CLI_EXPORT: camera track: {rec.CameraFrames.Count} keys");
+                string camPath = CameraPathFor(vmdPath);
+                WriteCameraVmd(camPath, records);
+                Debug.Log($"CLI_EXPORT: wrote camera {camPath} ({records.Count} keys)");
             }
             rec.SaveVMD(modelName, vmdPath);
             // Drop the recorder's transient first frame (a stale pose at capture start). For a
@@ -400,6 +404,30 @@ public static class MotionExporter
         finally
         {
             UnityEngine.Object.Destroy(rec);
+        }
+    }
+
+    /// The camera VMD written next to a motion VMD: <stem>_camera.vmd.
+    public static string CameraPathFor(string vmdPath)
+        => Path.Combine(Path.GetDirectoryName(vmdPath), Path.GetFileNameWithoutExtension(vmdPath) + "_camera.vmd");
+
+    /// A camera-only VMD: header, model name カメラ・照明, no bone or morph keys, the camera
+    /// keys, and empty light, shadow and IK sections.
+    static void WriteCameraVmd(string path, List<byte[]> records)
+    {
+        var enc = ShiftJisOrUtf8();
+        using (var fs = new FileStream(path, FileMode.Create))
+        using (var w = new BinaryWriter(fs))
+        {
+            var magic = new byte[30]; var m = enc.GetBytes("Vocaloid Motion Data 0002"); Array.Copy(m, magic, m.Length); w.Write(magic);
+            var name = new byte[20]; var n = enc.GetBytes("カメラ・照明"); Array.Copy(n, name, Math.Min(n.Length, 20)); w.Write(name);
+            w.Write(0);                          // bone keys
+            w.Write(0);                          // morph keys
+            w.Write(records.Count);
+            foreach (var r in records) w.Write(r);
+            w.Write(0);                          // light keys
+            w.Write(0);                          // self-shadow keys
+            w.Write(0);                          // IK keys
         }
     }
 
