@@ -262,7 +262,13 @@ public class UmaViewerMain : MonoBehaviour
         var shaders = UmaAssetManager.LoadAssetBundle(AbList["shader"], true);
         if (shaders != null)
         {
-            Builder.ShaderList = new List<Shader>(shaders.LoadAllAssets<Shader>());
+            // The game's bundle shaders are DX-only. On WebGL (GLES3) they have no usable variant
+            // and are swapped to the in-project ports at merge, so don't LoadAllAssets them: that
+            // force-loads every shader in the bundle and logs "not supported on this GPU" once each
+            // (~491 errors). The bundle stays loaded, so the handful a costume actually uses still
+            // resolve lazily. ShaderList only feeds the generic-costume fixup, which no-ops empty.
+            if (Application.platform != RuntimePlatform.WebGLPlayer)
+                Builder.ShaderList = new List<Shader>(shaders.LoadAllAssets<Shader>());
             Gallop.ShaderManager.InitManager();
             Gallop.ShaderManager.WarmupDofBloomShader();
         }
