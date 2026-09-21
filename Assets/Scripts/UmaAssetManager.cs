@@ -389,22 +389,39 @@ public class UmaAssetManager : MonoBehaviour
         {
             handle.NeverUnload = true;
 
-            EyeShader = bundle.LoadAsset<Shader>(
-                "assets/_gallop/resources/shader/3d/character/charactertooneyet.shader");
-            FaceShader = bundle.LoadAsset<Shader>(
-                "assets/_gallop/resources/shader/3d/character/charactertoonfacetser.shader");
-            HairShader = bundle.LoadAsset<Shader>(
-                "assets/_gallop/resources/shader/3d/character/charactertoonhairtser.shader");
-            AlphaShader = bundle.LoadAsset<Shader>(
-                "assets/_gallop/resources/shader/3d/character/characteralphanolinetoonhairtser.shader");
-            CheekShader = bundle.LoadAsset<Shader>(
-                "assets/_gallop/resources/shader/3d/character/charactermultiplycheek.shader");
-            EyebrowShader = bundle.LoadAsset<Shader>(
-                "assets/_gallop/resources/shader/3d/character/charactertoonmayu.shader");
-            BodyAlphaShader = bundle.LoadAsset<Shader>(
-                "assets/_gallop/resources/shader/3d/character/characteralphanolinetoontser.shader");
-            BodyBehindAlphaShader = bundle.LoadAsset<Shader>(
-                "assets/_gallop/resources/shader/3d/character/characteralphanolinetoonbehindtser.shader");
+            if (Application.platform == RuntimePlatform.WebGLPlayer)
+            {
+                // The DX-only bundle shaders don't load on WebGL (they log "not supported on this
+                // GPU"). Bind the in-project ports by name instead, which is also what the merge
+                // swap would resolve them to, so nothing renders through the bundle shader.
+                EyeShader = Shader.Find("Gallop/3D/Chara/ToonEye/T");
+                FaceShader = Shader.Find("Gallop/3D/Chara/ToonFace/TSER");
+                HairShader = Shader.Find("Gallop/3D/Chara/ToonHair/TSER");
+                AlphaShader = Shader.Find("Gallop/3D/Chara/AlphaNolineToonHair/TSER");
+                CheekShader = Shader.Find("Gallop/3D/Chara/MultiplyCheek");
+                EyebrowShader = Shader.Find("Gallop/3D/Chara/ToonMayu");
+                BodyAlphaShader = Shader.Find("Gallop/3D/Chara/AlphaNolineToon/TSER");
+                BodyBehindAlphaShader = Shader.Find("Gallop/3D/Chara/AlphaNolineToonBehind/TSER");
+            }
+            else
+            {
+                EyeShader = bundle.LoadAsset<Shader>(
+                    "assets/_gallop/resources/shader/3d/character/charactertooneyet.shader");
+                FaceShader = bundle.LoadAsset<Shader>(
+                    "assets/_gallop/resources/shader/3d/character/charactertoonfacetser.shader");
+                HairShader = bundle.LoadAsset<Shader>(
+                    "assets/_gallop/resources/shader/3d/character/charactertoonhairtser.shader");
+                AlphaShader = bundle.LoadAsset<Shader>(
+                    "assets/_gallop/resources/shader/3d/character/characteralphanolinetoonhairtser.shader");
+                CheekShader = bundle.LoadAsset<Shader>(
+                    "assets/_gallop/resources/shader/3d/character/charactermultiplycheek.shader");
+                EyebrowShader = bundle.LoadAsset<Shader>(
+                    "assets/_gallop/resources/shader/3d/character/charactertoonmayu.shader");
+                BodyAlphaShader = bundle.LoadAsset<Shader>(
+                    "assets/_gallop/resources/shader/3d/character/characteralphanolinetoontser.shader");
+                BodyBehindAlphaShader = bundle.LoadAsset<Shader>(
+                    "assets/_gallop/resources/shader/3d/character/characteralphanolinetoonbehindtser.shader");
+            }
         }
 
         SyncLegacyDictionaries(handle);
