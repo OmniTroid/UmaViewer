@@ -256,7 +256,30 @@ public class UmaAssetManager : MonoBehaviour
 
         try
         {
-            if (!entry.IsEncrypted)
+            if (WebFileMount.Active)
+            {
+                // WebGL rejects Standalone-target bundles; patch the target byte and load from
+                // memory (the decrypt happens up front rather than through a stream).
+                byte[] raw;
+                if (!entry.IsEncrypted)
+                {
+                    raw = File.ReadAllBytes(filePath);
+                }
+                else
+                {
+                    using var s = new UmaAssetBundleStream(filePath, entry.FKey);
+                    raw = new byte[s.Length];
+                    int got = 0;
+                    while (got < raw.Length)
+                    {
+                        int n = s.Read(raw, got, raw.Length - got);
+                        if (n <= 0) break;
+                        got += n;
+                    }
+                }
+                bundle = AssetBundle.LoadFromMemory(WebGLBundlePatch.Patch(raw));
+            }
+            else if (!entry.IsEncrypted)
             {
                 bundle = AssetBundle.LoadFromFile(filePath);
             }
