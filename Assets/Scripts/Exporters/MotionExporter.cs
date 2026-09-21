@@ -173,13 +173,19 @@ public static class MotionExporter
         var faceAnimator = container.UmaFaceAnimator;
         float prevFaceSpeed = faceAnimator != null ? faceAnimator.speed : 1f;
         float prevCamSpeed = camAnimator != null ? camAnimator.speed : 1f;
-        // (Re)start the clip and everything that runs alongside it at their frame 0.
+        // (Re)start the clip and everything that runs alongside it at their frame 0. States are
+        // named: Play(0, ...) would pin whatever state is current, and right after LoadAnimation
+        // the viewer's own Play("motion_2") on the face animator is still pending.
         void StartClips()
         {
             if (isTransition) container.OverrideController["clip_2"] = clip;
             animator.Play("motion_2", 0, 0);
-            animator.Play(0, 2, 0);                       // position layer (_pos)
-            if (faceAnimator != null && faceAnimator.runtimeAnimatorController != null) { faceAnimator.Play(0, 0, 0); faceAnimator.Play(0, 1, 0); }
+            animator.Play("motion_p", 2, 0);              // position layer (_pos)
+            if (faceAnimator != null && faceAnimator.runtimeAnimatorController != null)
+            {
+                faceAnimator.Play("motion_2", 0, 0);      // _face
+                faceAnimator.Play("motion_2", 1, 0);      // _ear
+            }
             if (camAnimator != null && camAnimator.runtimeAnimatorController != null) camAnimator.Play("motion_1", 0, 0);
         }
         void SetSpeeds(float v)
@@ -309,7 +315,7 @@ public static class MotionExporter
                 // Match the bone frames' numbering: recorded 60fps frame k -> VMD frame k/WriteStride,
                 // then the transient frame 0 is dropped and everything shifts down by one; a loop
                 // keeps only one period.
-                int keep = (opt.RecordSeconds > 0f || !isLoop) ? int.MaxValue : Mathf.RoundToInt(len * 30f);
+                int keep = opt.RecordSeconds > 0f ? int.MaxValue : Mathf.RoundToInt(len * 30f);
                 for (int k = 0; k < camSamples.Count; k += rec.WriteStride)
                 {
                     int j = k / rec.WriteStride;
@@ -321,9 +327,11 @@ public static class MotionExporter
             rec.SaveVMD(modelName, vmdPath);
             // Drop the recorder's transient first frame (a stale pose at capture start). For a
             // loop, keep exactly frames 1..P (P = one period) so the seam is a single step
-            // regardless of how fast the motion is; the wrap is phase0<-phaseP-1. Raw captures
-            // (RecordSeconds) and non-loop clips keep everything after frame 0.
-            int period = (opt.RecordSeconds > 0f || !isLoop) ? int.MaxValue : Mathf.RoundToInt(len * 30f);
+            // regardless of how fast the motion is; the wrap is phase0<-phaseP-1. A non-loop
+            // clip keeps exactly its own frames (a card cut-in's chain event at 0.99*len would
+            // otherwise put the next cut's first pose on the frame after). Raw captures
+            // (RecordSeconds) keep everything after frame 0.
+            int period = opt.RecordSeconds > 0f ? int.MaxValue : Mathf.RoundToInt(len * 30f);
             try { TrimLoop(vmdPath, period, opt.DropMouth, opt.AddBlink); }
             catch (Exception ex) { Debug.LogWarning("CLI_EXPORT: loop trim skipped: " + ex); }
         }
