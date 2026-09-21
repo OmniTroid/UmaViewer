@@ -230,7 +230,7 @@ public class UISettingsExport : MonoBehaviour
         var target = loaded;
         if (preanim)
         {
-            target = MotionProbe.StartClipOf(Main, loaded.Name);
+            target = MotionExporter.StartClipOf(Main, loaded.Name);
             if (target == null)
             {
                 UI.ShowMessage($"{Path.GetFileName(loaded.Name)} has no build-up (_s) clip", UIMessageType.Warning);
