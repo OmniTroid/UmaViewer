@@ -19,9 +19,9 @@ public static class CySpringPhysicsExporter
     const ushort CLOTH_MASK = 0x0001; // collide with group 0 (body colliders) only, not self
     const ushort BODY_MASK = 0xFFFE;  // collide with every group except 0 (other body colliders)
 
-    // drag/stiff are held in the native solver's own scale, not the raw asset values.
-    // CySpringPlugin.cpp divides StiffnessForce by 100 and DragForce by 1000 (constants
-    // recovered from the DLL's .rdata), so the raw fields run 130..700 and 200..1050.
+    // drag/stiff are held in the solver's own scale, not the raw asset values.
+    // CySpringPlugin.dll divides StiffnessForce by 1000 and DragForce by 100 (0x18008ec8c,
+    // 0x18008ec80); the raw fields run 130..700 and 200..1050.
     struct P { public float drag, stiff, radius; public bool limited; public Vector3 lmax; }
 
     // CySpring's per-step stiffness (1.3..7.0 here) and a PMX/Bullet angular spring constant
@@ -209,10 +209,8 @@ public static class CySpringPhysicsExporter
         float degLimit = jiggle ? 8f : (p.limited ? Mathf.Max(1f, Mathf.Min(Mathf.Abs(p.lmax.x), Mathf.Min(Mathf.Abs(p.lmax.y), Mathf.Abs(p.lmax.z)))) : 40f);
         float rad = Mathf.Min(degLimit, 90f) * Mathf.Deg2Rad;
         // Stiffness is CySpring's main restoring term -- it pulls each bone back toward its
-        // rest direction every step, and it varies 5.4x across this model. Cloth previously
-        // got no spring at all because springs were seen to oscillate, but at that time the
-        // writer negated x and z, so they were emitted as (-20, 20, -20): a negative constant
-        // pushes away from rest and diverges. With that fixed, carry the real per-bone value.
+        // rest direction every step, and varies about 5x across a model -- so carry the
+        // per-bone value.
         float k = Mathf.Max(0f, p.stiff) * SPRING_SCALE;
         var spring = new Vector3(k, k, k);
         return new MMDJoint

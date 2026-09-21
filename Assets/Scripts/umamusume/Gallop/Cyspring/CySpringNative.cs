@@ -209,10 +209,8 @@ namespace Gallop
                 return;
             }
 
-            // Differential mode: step the managed port on a copy of the pre-step state, let the
-            // plugin below advance the real state, then compare. Same input, one step, so the
-            // residual is attributable rather than accumulated. The simulation keeps the
-            // plugin's result, which makes every later frame a fresh comparison too.
+            // Differential: run the managed solver on a copy of the pre-step state, let the plugin
+            // advance the real state, compare. The simulation continues on the plugin's result.
             NativeClothCollision[] savedRadii = CySpringDiff.ScaleColliders(collisionArray);
             int[] savedChara = CySpringDiff.ScaleBones(clothWorkingArray, nClothWorking);
             NativeClothWorking[] nativeTracePre = CySpringTrace.Armed ? CySpringDiff.Snapshot(clothWorkingArray) : null;
@@ -321,9 +319,8 @@ namespace Gallop
                 return;
             }
 
-            // Differential for the skirt-linked entry point. This is where the skirt groups
-            // actually go -- not NativeSkirtUpdate -- and it had no differential and no trace,
-            // so the cloth solver could measure as exact while the skirt drifted tens of degrees.
+            // Differential for the skirt-linked entry point, as above; the skirt working state is
+            // compared as well as the cloth bones.
             NativeClothCollision[] skSavedRadii = CySpringDiff.ScaleColliders(collisionArray);
             int[] skSavedChara = CySpringDiff.ScaleBones(clothWorkingArray, nClothWorking);
             NativeClothWorking[] skClothPre = null, skClothMan = null, skTracePre = null;
@@ -480,10 +477,7 @@ namespace Gallop
                 return;
             }
 
-            // Differential for the skirt entry point, same idea as the cloth one: run the port on
-            // a copy of the pre-step state, let the plugin advance the real one, compare. This
-            // path had no differential at all, which is why the cloth solver could measure as
-            // exact while the skirt drifted tens of degrees in a free run.
+            // Differential for the standalone skirt entry point.
             NativeSkirtWorking skPre = default, skMan = default;
             bool skArmed = CySpringDiff.Armed;
             if (skArmed)

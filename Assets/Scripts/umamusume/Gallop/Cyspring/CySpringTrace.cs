@@ -6,24 +6,10 @@ using UnityEngine;
 
 namespace Gallop
 {
-    /// Full per-bone, per-step trace of the CySpring solve, for comparing two free-running
-    /// SEQUENCES rather than single steps.
-    ///
-    /// The single-step differential in CySpringDiff re-seeds from the plugin every frame, which
-    /// is what makes each residual attributable -- but it also means the solver only ever runs on
-    /// states the plugin itself produced. A defect that needs the port's own trajectory to reach
-    /// it is invisible there: the differential can report five of seven fields exactly matching
-    /// while the port, free-running, drifts forty degrees away.
-    ///
-    /// So: run the plugin alone, run the port alone, dump everything both times, and align the
-    /// two. Alignment is by call sequence number -- the spring groups are static, so the Nth call
-    /// of one run is the Nth call of the other.
-    ///
-    /// Each row carries the solve's INPUTS as well as its outputs, which is the point. If the
-    /// inputs already differ at the step where the outputs do, the divergence arrived from
-    /// outside the solver (the scene, via bone transforms) and the solver merely propagated it.
-    /// If the inputs match and the outputs do not, the solver itself is at fault on that step,
-    /// and the row says which field first.
+    /// Per-bone, per-call trace of the CySpring solve, inputs and outputs, for comparing two
+    /// free-running runs (plugin and managed) call-for-call. Rows are aligned by call sequence
+    /// number; the spring groups are static, so the Nth call of one run is the Nth of the other.
+    /// A row whose inputs match while its outputs differ localises a difference to that call.
     public static class CySpringTrace
     {
         public static bool Armed;
