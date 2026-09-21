@@ -74,19 +74,23 @@ jobs:
           buildName: UmaViewer
           buildsPath: build
 
+      # Same UmaViewer-<platform>-<sha>.zip naming as tools/package.sh, kept in PowerShell here
+      # since the game-ci build can leave the tree dirty and bash/zip aren't guaranteed on the runner.
       - name: Package Windows build
+        id: package
         shell: pwsh
-        run: >-
-          Compress-Archive
-          -Path "build/StandaloneWindows64/*"
-          -DestinationPath "UmaViewer-Windows-x64.zip"
-          -CompressionLevel Optimal
+        run: |
+          $sha = "$env:GITHUB_SHA".Substring(0, 7)
+          $zip = "dist/UmaViewer-windows-$sha.zip"
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path "build/StandaloneWindows64/*" -DestinationPath $zip -CompressionLevel Optimal
+          "zip=$zip" >> $env:GITHUB_OUTPUT
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: UmaViewer-Windows-x64
-          path: UmaViewer-Windows-x64.zip
+          name: UmaViewer-windows
+          path: ${{ steps.package.outputs.zip }}
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
@@ -97,9 +101,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+          ASSET: ${{ steps.package.outputs.zip }}
         run: |
           gh release create $env:RELEASE_TAG `
-            "UmaViewer-Windows-x64.zip#UmaViewer Windows x64 (IL2CPP)" `
+            "$($env:ASSET)#UmaViewer Windows x64 (IL2CPP)" `
             --target $env:GITHUB_SHA `
             --title "UmaViewer $env:RELEASE_TAG" `
             --generate-notes
