@@ -26,6 +26,72 @@ namespace Gallop
     {
         public static bool Armed;
 
+        // --solver-diff-collide <scale>: nothing in the running animations ever penetrates a
+        // body collider, so the collision path ran zero times in either solver and could not be
+        // compared. Scaling every collider's Radius around each call -- identically for the plugin
+        // and the port, since both read the same array -- makes bones penetrate, and the
+        // differential then judges the pushes. Saved and restored, not multiplied and divided, so
+        // it cannot drift across frames.
+        public static float CollideScale = 1f;
+        // --solver-diff-collide-mode inner|plane: the model has no inner colliders and no Type 3
+        // planes, so those two branches cannot be compared on real data. Synthesising them is
+        // legitimate for a differential -- the only requirement is that both solvers see the same
+        // input. "inner" marks every sphere IsInner (pair with a scale < 1 so bones fall outside
+        // and get pulled back in); "plane" turns every collider into a horizontal half-space
+        // through its own centre, normal +Y, so bones below it get pushed up.
+        public static string CollideMode = "";
+
+        /// Also force-enables every collider. The viewer never writes NativeClothCollision.IsEnable
+        /// (the initializer zeroes it and nothing sets it), so the plugin has been handed disabled
+        /// colliders on every frame and its collision code has never run here. Enabling them is
+        /// the only way to compare that code at all. Whole-struct snapshot, restored after.
+        public static NativeClothCollision[] ScaleColliders(NativeClothCollision[] col)
+        {
+            if (!Armed || col == null || (CollideScale == 1f && string.IsNullOrEmpty(CollideMode))) return null;
+            var saved = (NativeClothCollision[])col.Clone();
+            for (int i = 0; i < col.Length; i++)
+            {
+                col[i].Radius = saved[i].Radius * CollideScale;
+                col[i].IsEnable = 1;
+                if (CollideMode == "inner" && col[i].Type == 0) col[i].IsInner = 1;
+                else if (CollideMode == "chara") col[i].IsCharaCollision = 1;   // exercises the CheckCharaCollision filter
+                else if (CollideMode == "plane")
+                {
+                    col[i].Type = 3;
+                    col[i].Normal = new Vector3(0f, 1f, 0f);
+                    // Normal and Distance are read UNTRANSFORMED by the plugin (the Type 3 branch never
+                    // touches ParentWorkIndex), so this is a world height. 0.8 sits through the skirt
+                    // and lower hair on this rig, so plenty of bones cross it.
+                    col[i].Distance = 0.8f;
+                }
+            }
+            return saved;
+        }
+
+        /// "chara" mode also clears CheckCharaCollision on every bone -- the filter at 0x180007397
+        /// skips a chara collider only when the BONE flag is clear, and every bone on this rig has
+        /// it set, so without this the skip branch never runs in either solver.
+        public static int[] ScaleBones(NativeClothWorking[] cond, int n)
+        {
+            if (!Armed || cond == null || CollideMode != "chara") return null;
+            n = System.Math.Min(n, cond.Length);
+            var saved = new int[n];
+            for (int i = 0; i < n; i++) { saved[i] = cond[i].CheckCharaCollision; cond[i].CheckCharaCollision = 0; }
+            return saved;
+        }
+
+        public static void RestoreBones(NativeClothWorking[] cond, int[] saved)
+        {
+            if (saved == null || cond == null) return;
+            for (int i = 0; i < saved.Length && i < cond.Length; i++) cond[i].CheckCharaCollision = saved[i];
+        }
+
+        public static void RestoreColliders(NativeClothCollision[] col, NativeClothCollision[] saved)
+        {
+            if (saved == null || col == null) return;
+            System.Array.Copy(saved, col, System.Math.Min(saved.Length, col.Length));
+        }
+
         const int FIELDS = 7;
         static readonly string[] FieldNames =
             { "AimVector", "Force", "Diff", "TargetPosition", "PrevTargetPosition", "FinalRotation",

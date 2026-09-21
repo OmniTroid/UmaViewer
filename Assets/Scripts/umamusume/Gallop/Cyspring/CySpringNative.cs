@@ -235,6 +235,8 @@ namespace Gallop
             // plugin below advance the real state, then compare. Same input, one step, so the
             // residual is attributable rather than accumulated. The simulation keeps the
             // plugin's result, which makes every later frame a fresh comparison too.
+            NativeClothCollision[] savedRadii = CySpringDiff.ScaleColliders(collisionArray);
+            int[] savedChara = CySpringDiff.ScaleBones(clothWorkingArray, nClothWorking);
             NativeClothWorking[] nativeTracePre = CySpringTrace.Armed ? CySpringDiff.Snapshot(clothWorkingArray) : null;
             NativeClothWorking[] managedOut = null, preState = null;
             if (CySpringDiff.Armed)
@@ -295,6 +297,8 @@ namespace Gallop
             CySpringTrace.Record(nativeTracePre, clothWorkingArray, nClothWorking);
             if (managedOut != null)
                 CySpringDiff.Compare(clothWorkingArray, managedOut, preState, nClothWorking);
+            CySpringDiff.RestoreColliders(collisionArray, savedRadii);
+            CySpringDiff.RestoreBones(clothWorkingArray, savedChara);
         }
 
         private static void UpdateNativeClothSkirtInternal(
@@ -342,6 +346,8 @@ namespace Gallop
             // Differential for the skirt-linked entry point. This is where the skirt groups
             // actually go -- not NativeSkirtUpdate -- and it had no differential and no trace,
             // so the cloth solver could measure as exact while the skirt drifted tens of degrees.
+            NativeClothCollision[] skSavedRadii = CySpringDiff.ScaleColliders(collisionArray);
+            int[] skSavedChara = CySpringDiff.ScaleBones(clothWorkingArray, nClothWorking);
             NativeClothWorking[] skClothPre = null, skClothMan = null, skTracePre = null;
             NativeSkirtWorking skPre = default, skMan = default;
             bool skArmed = CySpringDiff.Armed;
@@ -411,6 +417,8 @@ namespace Gallop
                     CySpringDiff.Compare(clothWorkingArray, skClothMan, skClothPre, nClothWorking);
                     CySpringDiff.CompareSkirt(skPre, skirtWorkingArray[skirtWorkingIndex], skMan, arg);
                 }
+                CySpringDiff.RestoreColliders(collisionArray, skSavedRadii);
+                CySpringDiff.RestoreBones(clothWorkingArray, skSavedChara);
             }
             finally
             {

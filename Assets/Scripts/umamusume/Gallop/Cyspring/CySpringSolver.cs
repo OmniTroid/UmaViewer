@@ -83,48 +83,113 @@ namespace Gallop
             return Qrot(parents[pi].WorldRotation, local) + parents[pi].WorldPosition;
         }
 
-        /// Push pos onto the sphere of radius R about center, from whichever side IsInner asks.
-        static void PushToSphere(Vector3 center, float R, bool inner, ref Vector3 pos)
+        /// Move pos onto the sphere of radius R about center, along its current offset d (with
+        /// |d| = dist already known). Written as the plugin evaluates it -- d / dist * R + center,
+        /// per component (0x180007e63-0x180007e88 and 0x180007f2f-0x180007f54) -- rather than the
+        /// algebraically equal center + d * (R / dist), because the two round differently and
+        /// the point of this file is to match the plugin bit for bit.
+        static Vector3 OnSphere(Vector3 center, Vector3 d, float dist, float R)
         {
-            Vector3 d = pos - center;
-            float dist = Len(d);
-            if (dist <= 1e-6f) return;
-            if (inner) { if (dist > R) { pos = center + d * (R / dist); CollisionHits++; } }
-            else       { if (dist < R) { pos = center + d * (R / dist); CollisionHits++; } }
+            return new Vector3(d.x / dist * R + center.x, d.y / dist * R + center.y, d.z / dist * R + center.z);
         }
+
+        static float Len2(Vector3 v) => v.x * v.x + v.y * v.y + v.z * v.z;
 
         static void ResolveOne(ref NativeClothWorking bne, ref NativeClothCollision c,
                                NativeRootParentWork[] parents, ref Vector3 pos)
         {
             CollisionCalls++;
-            if (c.IsEnable == 0) return;
+            if (c.Type >= 0 && c.Type < 8) TypeSeen[c.Type]++;
+            if (c.IsEnable == 0) { SkipDisabled++; return; }
             // Character colliders only apply to bones that asked for them (0x180007397): if the
             // bone's CheckCharaCollision is clear, every IsCharaCollision collider is skipped.
-            if (bne.CheckCharaCollision == 0 && c.IsCharaCollision != 0) return;
-
-            // An inner collider SUBTRACTS the bone radius where an outer one adds it
-            // (0x180007e26 subss against 0xcc on the IsInner branch). The .cpp added it on both.
-            bool inner = c.IsInner != 0;
-            float R = inner ? c.Radius - bne.CollisionRadius : c.Radius + bne.CollisionRadius;
+            if (bne.CheckCharaCollision == 0 && c.IsCharaCollision != 0) { SkipChara++; return; }
 
             // Type dispatch at 0x1800073b6: 0 sphere, 2 capsule, 3 plane, and 1 deliberately
-            // falls through unhandled. The .cpp treated every non-zero type as a capsule, so
-            // planes were solved as capsules, and type 1 was solved when it should be skipped.
+            // falls through unhandled.
             switch (c.Type)
             {
                 case 0:
-                    PushToSphere(ColliderWorld(c.Position, parents, c.ParentWorkIndex), R, inner, ref pos);
-                    break;
+                {
+                    Vector3 center = ColliderWorld(c.Position, parents, c.ParentWorkIndex);
+                    Vector3 d = pos - center;
+                    float d2 = Len2(d);
+                    // The tests are on SQUARED distances and both are inclusive: the inner branch
+                    // skips only when d2 < R2 (comiss d2,R2 ; jb at 0x180007e38), the outer only
+                    // when R2 < d2 (0x180007f04). An inner collider SUBTRACTS the bone radius
+                    // (0x180007e26), an outer one adds it (0x180007ef2).
+                    if (c.IsInner != 0)
+                    {
+                        SeenInner++;
+                        float R = c.Radius - bne.CollisionRadius;
+                        if (d2 < R * R) return;
+                        pos = OnSphere(center, d, Mathf.Sqrt(d2), R);
+                    }
+                    else
+                    {
+                        float R = c.Radius + bne.CollisionRadius;
+                        if (R * R < d2) return;
+                        pos = OnSphere(center, d, Mathf.Sqrt(d2), R);
+                    }
+                    HitSphere++;
+                    // Every sphere push is followed by the length constraint about SelfPosition
+                    // (0x180007e9c-0x180008004): the push moved the bone off its sphere about the
+                    // anchor, and the plugin puts it back before the next collider.
+                    ConstrainLength(ref bne, bne.SelfPosition, ref pos);
+                    return;
+                }
 
                 case 2:
                 {
                     Vector3 p0 = ColliderWorld(c.Position, parents, c.ParentWorkIndex);
                     Vector3 p1 = ColliderWorld(c.Position2, parents, c.ParentWorkIndex);
+                    // No IsInner for capsules: 0x1800077c8 only ever adds the bone radius.
+                    float R = c.Radius + bne.CollisionRadius;
                     Vector3 ab = p1 - p0;
-                    float t = Vector3.Dot(pos - p0, ab) / (Vector3.Dot(ab, ab) + 1e-8f);
-                    t = t < 0 ? 0 : (t > 1 ? 1 : t);
-                    PushToSphere(p0 + ab * t, R, inner, ref pos);
-                    break;
+                    float L = Mathf.Sqrt(Len2(ab));                    // 0x1800078de
+                    Vector3 abh = new Vector3(ab.x / L, ab.y / L, ab.z / L);
+                    Vector3 v = pos - p0;
+                    float t = Vector3.Dot(v, abh);                     // a LENGTH along the axis, not 0..1
+
+                    // Side of the capsule, only for 0 <= t < L (0x180007957 skips t < 0,
+                    // 0x180007964 skips L <= t). Strict test against R (jbe at 0x1800079f9).
+                    if (t >= 0f && t < L)
+                    {
+                        Vector3 along = new Vector3(t * abh.x, t * abh.y, t * abh.z);
+                        Vector3 perp = v - along;
+                        float d = Mathf.Sqrt(Len2(perp));
+                        if (R > d)
+                        {
+                            // (p0 + along) + perp * (R / d): the plugin adds p0 to the along term
+                            // first (0x1800079ff) then divides R by d once and scales perp by it.
+                            float k = R / d;
+                            pos = new Vector3(along.x + p0.x + perp.x * k, along.y + p0.y + perp.y * k, along.z + p0.z + perp.z * k);
+                            HitCapsuleMid++;
+                            ConstrainLength(ref bne, bne.SelfPosition, ref pos);   // 0x180007a45
+                            return;
+                        }
+                        // A miss on the side does not exit: 0x180007aec falls straight into the
+                        // endpoint tests below. Redundant geometrically, reproduced anyway.
+                    }
+
+                    // Endpoint spheres, p0 then p1, inclusive squared tests (jb at 0x180007b24 and
+                    // 0x180007bce skip only on R2 < d2), and NEITHER re-constrains: both pushes
+                    // jump straight to the loop tail at 0x18000800a.
+                    float d0 = Len2(v);
+                    if (!(R * R < d0))
+                    {
+                        pos = OnSphere(p0, v, Mathf.Sqrt(d0), R);
+                        HitCapsuleEnd++;
+                        return;
+                    }
+                    Vector3 w1 = pos - p1;
+                    float d1 = Len2(w1);
+                    if (!(R * R < d1))
+                    {
+                        pos = OnSphere(p1, w1, Mathf.Sqrt(d1), R);
+                        HitCapsuleEnd++;
+                    }
+                    return;
                 }
 
                 case 3:
@@ -133,10 +198,11 @@ namespace Gallop
                     // the collider's ParentWorkIndex, unlike the sphere and capsule ones.
                     Vector3 n = c.Normal;
                     float dot = pos.x * n.x + pos.y * n.y + pos.z * n.z - c.Distance;
-                    if (dot > bne.CollisionRadius) break;               // comiss/ja at 0x180007412
+                    if (dot > bne.CollisionRadius) return;               // comiss/ja at 0x180007412
                     pos = pos + n * (bne.CollisionRadius - dot);
+                    HitPlane++;
                     ConstrainLength(ref bne, bne.SelfPosition, ref pos); // 0x18000744e
-                    break;
+                    return;
                 }
             }
         }
@@ -171,13 +237,21 @@ namespace Gallop
         // Branch-coverage counters. The single-step differential re-seeds from the plugin every
         // frame, so it only ever exercises the solver near the correct trajectory: a branch that
         // does not fire there is never compared, however wrong it is. These say which ones ran.
-        public static long ClampCalls, ClampBites, CollisionCalls, CollisionHits, SkirtKneeHits;
+        public static long ClampCalls, ClampBites, CollisionCalls, SkirtKneeHits;
+        public static long HitSphere, HitCapsuleMid, HitCapsuleEnd, HitPlane, SkipChara, SeenInner, SkipDisabled;
+        public static readonly long[] TypeSeen = new long[8];
+        public static long CollisionHits => HitSphere + HitCapsuleMid + HitCapsuleEnd + HitPlane;
         // How close clamp inputs sit to the wrap discontinuity at +-180. An euler triple is not
         // unique near there (nor near ZXY gimbal lock), so two numerically equal rotations can
         // produce very different triples -- and the clamp then maps them to very different
         // results. A bone sitting in this band is one branch flip away from a large jump.
         public static long ClampNear180, ClampNear90y;
-        public static void ResetCounters() { ClampCalls = ClampBites = CollisionCalls = CollisionHits = SkirtKneeHits = ClampNear180 = ClampNear90y = 0; }
+        public static void ResetCounters()
+        {
+            ClampCalls = ClampBites = CollisionCalls = SkirtKneeHits = ClampNear180 = ClampNear90y = 0;
+            HitSphere = HitCapsuleMid = HitCapsuleEnd = HitPlane = SkipChara = SeenInner = SkipDisabled = 0;
+            for (int i = 0; i < 8; i++) TypeSeen[i] = 0;
+        }
 
         static float ClampLimitAngle(float a, float lo, float hi)
         {
@@ -238,7 +312,14 @@ namespace Gallop
         {
             Vector3 dir = pos - anchor;
             float dl = Len(dir);
-            if (dl > 1e-6f) pos = anchor + dir * (b.InitBoneDistance / dl);
+            // dir / len * InitBoneDistance + anchor, per component, in that order -- divss, mulss,
+            // addss at 0x180009eeb-0x180009f12. Not anchor + dir * (D / len): same algebra, different
+            // rounding, and TargetPosition is compared to the last bit.
+            if (dl > 1e-6f)
+            {
+                float D = b.InitBoneDistance;
+                pos = new Vector3(dir.x / dl * D + anchor.x, dir.y / dl * D + anchor.y, dir.z / dl * D + anchor.z);
+            }
         }
 
         static void SolveCloth(int idx, ref NativeClothWorking b, NativeClothCollision[] col,
