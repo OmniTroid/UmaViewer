@@ -9,7 +9,7 @@ public static class HeadlessWebBuild
     // WebGL only supports IL2CPP, so there's no backend to switch (unlike the mac/win Mono
     // builds). Outputs a hostable folder: Build/Web/index.html + Build/Web/Build/*.
     // Pass -umaRelease (tools/build-web.sh --release) for a lean prod build; the default is a
-    // debug-friendly build with full stack traces and no data caching.
+    // debug-friendly build with full stack traces.
     public static void Build()
     {
         bool release = Environment.GetCommandLineArgs().Contains("-umaRelease");
@@ -17,6 +17,8 @@ public static class HeadlessWebBuild
         // Bake the 7-char git SHA in as the version, so a build is traceable to its commit and
         // WebGL data caching (below) invalidates per commit. A dirty tree shares its commit SHA,
         // so append a timestamp there to keep local rebuilds from serving a stale cached .data.
+        // Restored after the build so it doesn't leave ProjectSettings.asset modified in git.
+        string originalVersion = PlayerSettings.bundleVersion;
         PlayerSettings.bundleVersion = BuildVersion();
 
         PlayerSettings.WebGL.template = "PROJECT:UmaViewer";
@@ -45,6 +47,10 @@ public static class HeadlessWebBuild
             options = BuildOptions.None,
         };
         var report = BuildPipeline.BuildPlayer(options);
+
+        PlayerSettings.bundleVersion = originalVersion;
+        AssetDatabase.SaveAssets();
+
         var s = report.summary;
         if (s.result != BuildResult.Succeeded)
         {
