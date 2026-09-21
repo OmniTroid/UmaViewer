@@ -12,12 +12,17 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=ROOT, **kw)
 
+    # .unityweb (decompression-fallback) and .gz builds are gzip-compressed; advertising the
+    # encoding lets the browser decompress natively instead of the loader's JS fallback.
     def end_headers(self):
-        if self.path.endswith(".gz"):
+        if self.path.endswith(".gz") or self.path.endswith(".unityweb"):
             self.send_header("Content-Encoding", "gzip")
-        if self.path.endswith(".wasm") or self.path.endswith(".wasm.gz"):
-            self.send_header("Content-Type", "application/wasm")
         super().end_headers()
+
+    def guess_type(self, path):
+        if ".wasm" in path:
+            return "application/wasm"
+        return super().guess_type(path)
 
 def main():
     if not os.path.isdir(ROOT):
