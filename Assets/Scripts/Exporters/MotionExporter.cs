@@ -50,6 +50,8 @@ public static class MotionExporter
 
     /// How long a non-loop clip's first frame is held, physics running, before capture.
     const float HoldSeconds = 2f;
+    /// Log the live camera and head per recorded frame (CLI_CAM), for checking a camera export.
+    public static bool DebugCameraLog = false;
 
     public static bool IsLoop(string assetName) => assetName.Contains("_loop");
     public static bool IsTransitionClip(string assetName) => assetName.EndsWith("_s") || assetName.EndsWith("_e");
@@ -118,6 +120,11 @@ public static class MotionExporter
             Debug.Log($"CLI_EXPORT: baking {springXf.Count} spring bones (PMX written without rigid bodies)");
         }
 
+        // The character's own height scale (171 cm Fenomeno: 1.064). The viewer drops it to 1
+        // while a camera clip plays, because the cameras are framed for the base model; the PMX
+        // is exported at the natural scale, so positions recorded at base scale are brought
+        // back up by the ratio afterwards (a uniform similarity keeps the framing exact).
+        float naturalScale = container.BodyScale;
         AnimationClip clip = null;
         try { clip = anim.Get<AnimationClip>(); } catch { }
         container.LoadAnimation(anim);
@@ -220,6 +227,7 @@ public static class MotionExporter
         }
 
         UnityHumanoidVMDRecorder rec = null;
+        float capturedScale = naturalScale;
         try
         {
             if (playDirect)
@@ -298,6 +306,8 @@ public static class MotionExporter
                 Debug.Log($"CLI_STATE: capture starts in {stName} t={st.normalizedTime:F2} len={st.length:F2}s transition={animator.IsInTransition(0)} clip_1={Clip("clip_1")} clip_2={Clip("clip_2")} clip_s={Clip("clip_s")} clip_e={Clip("clip_e")}");
             }
             rec.StartRecording();
+            var positionRoot = container.transform.Find("Position");
+            capturedScale = positionRoot != null ? positionRoot.lossyScale.x : naturalScale;
             // A loop: a full period plus a small margin so frame P (phase 0 of the next cycle)
             // is present; the trim below keeps exactly one period. RecordSeconds overrides this
             // to record raw for external loop-finding.
@@ -316,7 +326,15 @@ public static class MotionExporter
             {
                 // The camera pose visible now is what the recorder's FixedUpdate captured this
                 // frame as recorded frame i-1, unless recording was paused for that FixedUpdate.
-                if (cam != null && i >= 1 && !camPausedLastFixed) camSamples.Add(CameraSample.Of(cam));
+                if (cam != null && i >= 1 && !camPausedLastFixed)
+                {
+                    camSamples.Add(CameraSample.Of(cam));
+                    if (DebugCameraLog)
+                    {
+                        var t = cam.transform; var head = container.HeadBone != null ? container.HeadBone.transform.position : Vector3.zero;
+                        Debug.Log($"CLI_CAM {camSamples.Count - 1} P{t.position.ToString("F4")} F{t.forward.ToString("F4")} U{t.up.ToString("F4")} fov {cam.fieldOfView:F2} H{head.ToString("F4")} R{container.transform.Find("Position").position.ToString("F4")} S{container.transform.Find("Position").lossyScale.x:F4}");
+                    }
+                }
                 if (chain && i > 2)
                 {
                     if (holdEnd >= 0 && i == holdEnd)
@@ -376,6 +394,7 @@ public static class MotionExporter
             if (opt.BakePhysics && !prevPhysics) container.SetDynamicBoneEnable(false);
         }
 
+        float posScale = (capturedScale > 1e-4f && Mathf.Abs(naturalScale / capturedScale - 1f) > 1e-4f) ? naturalScale / capturedScale : 1f;
         try
         {
             if (cam != null)
@@ -389,7 +408,8 @@ public static class MotionExporter
                 {
                     int j = k / rec.WriteStride;
                     if (j < 1 || j > keep) continue;
-                    records.Add(camSamples[k].ToVmdRecord(j - 1));
+                    var cs = camSamples[k]; cs.Position *= posScale;
+                    records.Add(cs.ToVmdRecord(j - 1));
                 }
                 string camPath = CameraPathFor(vmdPath);
                 WriteCameraVmd(camPath, records);
@@ -405,11 +425,33 @@ public static class MotionExporter
             int period = opt.RecordSeconds > 0f ? int.MaxValue : chain ? Mathf.RoundToInt(chainLen * 30f) : Mathf.RoundToInt(len * 30f);
             try { TrimLoop(vmdPath, period, opt.DropMouth, opt.AddBlink); }
             catch (Exception ex) { Debug.LogWarning("CLI_EXPORT: loop trim skipped: " + ex); }
+            if (posScale != 1f)
+            {
+                ScaleBonePositions(vmdPath, posScale);
+                Debug.Log($"CLI_EXPORT: recorded at height scale {capturedScale:F4}; positions scaled by {posScale:F4} to the character's {naturalScale:F4}");
+            }
         }
         finally
         {
             UnityEngine.Object.Destroy(rec);
         }
+    }
+
+    /// Multiply every bone key's position by s (records are 111 bytes, position at offset 19).
+    static void ScaleBonePositions(string path, float s)
+    {
+        byte[] d = File.ReadAllBytes(path);
+        int count = BitConverter.ToInt32(d, 50);
+        for (int i = 0; i < count; i++)
+        {
+            int o = 54 + i * 111 + 19;
+            for (int c = 0; c < 3; c++)
+            {
+                float v = BitConverter.ToSingle(d, o + 4 * c) * s;
+                Buffer.BlockCopy(BitConverter.GetBytes(v), 0, d, o + 4 * c, 4);
+            }
+        }
+        File.WriteAllBytes(path, d);
     }
 
     /// The camera VMD written next to a motion VMD: <stem>_camera.vmd.

@@ -240,6 +240,7 @@ public class CliExporter : MonoBehaviour
                 FollowChain = !Flag("--no-chain"),      // a card cut-in records its whole cut chain unless told not to
             };
             int.TryParse(Opt("--physics-fps", "60"), out opt.PhysicsFps);
+            MotionExporter.DebugCameraLog = Flag("--debug-camera");
             float.TryParse(Opt("--warmup", "2"), out opt.WarmupPeriods);
             int.TryParse(Opt("--align-lead", "3"), out opt.AlignLead);
             // Defaults to the model's stem so a model/motion pair stays matched.
