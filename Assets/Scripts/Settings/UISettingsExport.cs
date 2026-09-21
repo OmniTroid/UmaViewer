@@ -14,6 +14,7 @@ using UnityEngine.UI;
 ///  * Export Preanim -- the clip's _s build-up, from the shared neutral stance into the pose.
 ///  * Export Loop    -- the loaded _loop clip, one period, starting at the clip's frame 0
 ///                      (a non-loop clip: start to end, with its camera as <name>_camera.vmd).
+///  * Export Postanim -- the clip's _e wind-down, from the pose back to the neutral stance.
 ///
 /// The section is built at start-up from the scene's own sidebar pieces (a header button, a
 /// button row and a label cloned from the Other section), so the scene needs no edit.
@@ -26,7 +27,8 @@ public class UISettingsExport : MonoBehaviour
     const float RowHeight = 50f;    // the Other section's row height
     const float InfoHeight = 80f;   // three short lines
 
-    Button modelButton, idleButton, preanimButton;
+    Button modelButton, idleButton, preanimButton, postanimButton;
+    enum Part { Loop, Preanim, Postanim }
     TMP_Text infoText;
     bool busy;
     string describedClip;
@@ -67,11 +69,12 @@ public class UISettingsExport : MonoBehaviour
         var panel = section.AddComponent<UISettingsExport>();
         panel.infoText = panel.AddInfoRow(rowTemplate, labelTemplate);
         panel.modelButton = panel.AddButtonRow(rowTemplate, "Export Model (PMX)", panel.ExportModel);
-        panel.preanimButton = panel.AddButtonRow(rowTemplate, "Export Preanim", () => panel.StartCoroutine(panel.ExportCurrentMotion(true)));
-        panel.idleButton = panel.AddButtonRow(rowTemplate, "Export Loop", () => panel.StartCoroutine(panel.ExportCurrentMotion(false)));
+        panel.preanimButton = panel.AddButtonRow(rowTemplate, "Export Preanim", () => panel.StartCoroutine(panel.ExportCurrentMotion(Part.Preanim)));
+        panel.idleButton = panel.AddButtonRow(rowTemplate, "Export Loop", () => panel.StartCoroutine(panel.ExportCurrentMotion(Part.Loop)));
+        panel.postanimButton = panel.AddButtonRow(rowTemplate, "Export Postanim", () => panel.StartCoroutine(panel.ExportCurrentMotion(Part.Postanim)));
 
         var rt = section.GetComponent<RectTransform>();
-        rt.sizeDelta = new Vector2(rt.sizeDelta.x, InfoHeight + 3f * RowHeight);
+        rt.sizeDelta = new Vector2(rt.sizeDelta.x, InfoHeight + 4f * RowHeight);
         return panel;
     }
 
@@ -132,7 +135,7 @@ public class UISettingsExport : MonoBehaviour
     void SetBusy(bool on, Button which = null, string label = null)
     {
         busy = on;
-        foreach (var b in new[] { modelButton, idleButton, preanimButton }) if (b) b.interactable = !on;
+        foreach (var b in new[] { modelButton, idleButton, preanimButton, postanimButton }) if (b) b.interactable = !on;
         if (which && label != null) SetLabel(which.gameObject, label);
     }
 
@@ -168,12 +171,14 @@ public class UISettingsExport : MonoBehaviour
         {
             if (infoText) infoText.text = "No animation loaded";
             if (preanimButton) preanimButton.interactable = false;
+            if (postanimButton) postanimButton.interactable = false;
             if (idleButton) idleButton.interactable = false;
             return;
         }
         var r = MotionProbe.Probe(Main, name, loadClips: true);
         if (infoText) infoText.text = Summary(r);
         if (preanimButton) preanimButton.interactable = !busy && r.HasPreanim;
+        if (postanimButton) postanimButton.interactable = !busy && r.End != null;
         if (idleButton)
         {
             idleButton.interactable = !busy && r.Entry != null;
@@ -209,7 +214,7 @@ public class UISettingsExport : MonoBehaviour
 #endif
     }
 
-    IEnumerator ExportCurrentMotion(bool preanim)
+    IEnumerator ExportCurrentMotion(Part part)
     {
         if (busy) yield break;
 #if UNITY_STANDALONE || UNITY_EDITOR
@@ -228,7 +233,7 @@ public class UISettingsExport : MonoBehaviour
             yield break;
         }
         var target = loaded;
-        if (preanim)
+        if (part == Part.Preanim)
         {
             target = MotionExporter.StartClipOf(Main, loaded.Name);
             if (target == null)
@@ -237,12 +242,21 @@ public class UISettingsExport : MonoBehaviour
                 yield break;
             }
         }
+        else if (part == Part.Postanim)
+        {
+            target = MotionExporter.EndClipOf(Main, loaded.Name);
+            if (target == null)
+            {
+                UI.ShowMessage($"{Path.GetFileName(loaded.Name)} has no wind-down (_e) clip", UIMessageType.Warning);
+                yield break;
+            }
+        }
 
         var dirs = StandaloneFileBrowser.OpenFolderPanel("Export motion to", Config.Instance.MainPath, false);
         if (dirs == null || dirs.Length == 0 || string.IsNullOrEmpty(dirs[0])) yield break;
         string vmdPath = Path.Combine(dirs[0], Path.GetFileName(target.Name) + ".vmd");
 
-        var button = preanim ? preanimButton : idleButton;
+        var button = part == Part.Preanim ? preanimButton : part == Part.Postanim ? postanimButton : idleButton;
         string label = GetLabel(button);
         SetBusy(true, button, "Exporting...");
 
@@ -250,7 +264,7 @@ public class UISettingsExport : MonoBehaviour
         yield return MotionExporter.RunSafe(
             MotionExporter.Record(container, target, vmdPath, container.name, new MotionExporter.Options()), e => err = e);
 
-        if (preanim) container.LoadAnimation(loaded);   // Record left the _s clip in the slot
+        if (part != Part.Loop) container.LoadAnimation(loaded);   // Record left the _s/_e clip in the slot
         UI.LoadedAnimation();                             // reapply the panel's speed setting
         SetBusy(false, button, label);
         describedClip = null;                             // re-probe: buttons back to the loaded animation's state
