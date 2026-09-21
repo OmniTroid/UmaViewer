@@ -17,6 +17,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def end_headers(self):
         if self.path.endswith(".gz") or self.path.endswith(".unityweb"):
             self.send_header("Content-Encoding", "gzip")
+        # Never let the browser reuse a stale build during local dev.
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
         super().end_headers()
 
     def guess_type(self, path):
