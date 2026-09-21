@@ -147,7 +147,7 @@ public class UISettingsExport : MonoBehaviour
         var parts = new List<string>();
         if (r.Loop != null) parts.Add("loop " + Frames(r.LoopSeconds));
         if (r.Start != null) parts.Add("preanim " + Frames(r.StartSeconds));
-        if (r.End != null) parts.Add("end " + Frames(r.EndSeconds));
+        if (r.End != null) parts.Add("postanim " + Frames(r.EndSeconds));
         if (r.IsOneShot) parts.Add("one-shot " + Frames(r.Seconds));
         var extras = new List<string>();
         if (r.HasCamera) extras.Add("camera");
