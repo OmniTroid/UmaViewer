@@ -33,15 +33,34 @@ namespace Gallop
         private static void ProbeNativePlugin()
         {
             if (!isNative) return; // already managed (WebGL, or set by the caller)
+            // One real, skipped bone. The plugin reads bone 0 and its root parent before it
+            // looks at the count (0x18000918a, 0x1800091ac), so null pointers are a fault, not
+            // a no-op.
+            var cloth = new NativeClothWorking[1];
+            cloth[0].IsSkip = 1;
+            cloth[0].InitLocalRotation = cloth[0].ParentRotation = cloth[0].AnimationRotation = cloth[0].FinalRotation = Quaternion.identity;
+            var parents = new NativeRootParentWork[1];
+            parents[0].WorldRotation = Quaternion.identity;
+            var colliders = new NativeClothCollision[1];
+            PinnedArray<NativeClothWorking> clothPin = null;
+            PinnedArray<NativeClothCollision> collPin = null;
+            PinnedArray<NativeRootParentWork> parentPin = null;
             try
             {
-                NativeClothUpdate(IntPtr.Zero, 0, IntPtr.Zero, IntPtr.Zero,
+                clothPin = new PinnedArray<NativeClothWorking>(cloth);
+                collPin = new PinnedArray<NativeClothCollision>(colliders);
+                parentPin = new PinnedArray<NativeRootParentWork>(parents);
+                NativeClothUpdate(clothPin.Ptr, 1, collPin.Ptr, parentPin.Ptr,
                     0f, 0f, 0f, 0f, 0f, 0f, 0f, false, 1f, false, 1f, 1f, 1f);
             }
             catch (Exception e)
             {
                 isNative = false;
                 Debug.LogWarning("[CySpring] native plugin not loadable (" + e.GetType().Name + "); using the managed C# solver.");
+            }
+            finally
+            {
+                parentPin?.Dispose(); collPin?.Dispose(); clothPin?.Dispose();
             }
         }
 

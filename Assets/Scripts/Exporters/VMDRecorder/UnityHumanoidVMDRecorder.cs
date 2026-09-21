@@ -137,7 +137,6 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
     public MorphRecorder morphRecorderSaved;
 
     private UmaContainer container;
-    float aposeDegress = 38.5f;
 
     public bool IsLive;
 
@@ -229,15 +228,8 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
         var characterContainer = GetComponentInParent<UmaContainerCharacter>();
         var animator = characterContainer.UmaAnimator;
         var state = animator.GetCurrentAnimatorStateInfo(0);
-        animator.enabled = false;
-
-        // Set to T-Pose
-        characterContainer.ResetBodyPose();
-        characterContainer.UpBodyReset();
-
-        // A-Pose旋转已移除：Ghost在T-Pose初始化，与PMX导出的参考姿势一致
-        // BoneDictionary[BoneNames.左腕].Rotate(0, 0, -aposeDegress);
-        // BoneDictionary[BoneNames.右腕].Rotate(0, 0, aposeDegress);
+        // Reference pose shared with ModelExporter (see MMDRestPose); leaves the animator disabled.
+        MMDRestPose.Apply(characterContainer);
 
         SetInitialPositionAndRotation();
 
@@ -262,9 +254,6 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
         boneGhost = new BoneGhost(BoneDictionary, UseBottomCenter);
         morphRecorder = new MorphRecorder(transform);
 
-        // A-Pose恢复已移除（与上方对应）
-        // BoneDictionary[BoneNames.左腕].Rotate(0, 0, aposeDegress);
-        // BoneDictionary[BoneNames.右腕].Rotate(0, 0, -aposeDegress);
         animator.enabled = true;
         animator.Play(state.shortNameHash, 0, state.normalizedTime);
     }

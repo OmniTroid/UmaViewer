@@ -31,7 +31,10 @@ public class ModelExporter
         container.SetDynamicBoneEnable(false);
         container.EnablePhysics = false;
         container.UmaFaceAnimator?.Rebind();
-        container.UmaAnimator?.Rebind();
+        // Rest pose shared with the VMD recorder (see MMDRestPose): a recorded VMD is a delta
+        // from exactly the pose the PMX is bound in.
+        var bodyAnimator = container.UmaAnimator;
+        bool animatorWasEnabled = MMDRestPose.Apply(container);
         container.EnableEyeTracking = false;
         container.FaceDrivenKeyTarget?.FacialResetAll();
         
@@ -56,6 +59,7 @@ public class ModelExporter
         {
             RemoveBillboard(container);
             ClearBlendShape(container);
+            if (bodyAnimator != null) bodyAnimator.enabled = animatorWasEnabled;
         }
 
         UmaViewerUI.Instance.ShowMessage($"PMX Save at {path}", UIMessageType.Success);

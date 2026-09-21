@@ -326,10 +326,12 @@ public class UmaContainerCharacter : UmaContainer
             }
         }
 
+        // Local space: MergeModel runs before SetHeight scales Position, so world positions
+        // captured here would restore an unscaled skeleton under a scaled hierarchy.
         InitBoneTransform = new Dictionary<Transform, (Vector3 pos, Quaternion rot)>();
         foreach (var bone in bodySkinnedMeshRenderer.bones)
         {
-            InitBoneTransform[bone] = (bone.position, bone.rotation);
+            InitBoneTransform[bone] = (bone.localPosition, bone.localRotation);
         }
     }
 
@@ -2563,7 +2565,8 @@ public class UmaContainerCharacter : UmaContainer
         }
         foreach (var pair in InitBoneTransform)
         {
-            pair.Key.SetPositionAndRotation(pair.Value.pos, pair.Value.rot);
+            pair.Key.localPosition = pair.Value.pos;
+            pair.Key.localRotation = pair.Value.rot;
         }
     }
 

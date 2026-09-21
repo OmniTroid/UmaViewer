@@ -262,6 +262,7 @@ public class CliExporter : MonoBehaviour
             container.EnableEyeTracking = false;
             float len = (clip != null && clip.length > 0.01f) ? clip.length : 5f;
             bool isLoop = animId.Contains("loop") || (clip != null && clip.name.Contains("loop"));
+            Debug.Log($"CLI_CLIP: {anim.Name} length={len:F3}s ({Mathf.RoundToInt(len * 30f)} frames at 30fps) loop={isLoop}");
 
             // Deterministic capture: lock game time to a fixed 1/30 step (frame count and
             // pose sampling no longer depend on wall-clock speed), and force the job system
@@ -305,6 +306,29 @@ public class CliExporter : MonoBehaviour
                 float warm = 0f, warmTarget = Mathf.Max(1.5f, len * warmPeriods);
                 Debug.Log($"CLI_EXPORT: warming {warmPeriods:0.#} periods ({warmTarget:0.00}s) before capture");
                 while (warm < warmTarget) { warm += Time.deltaTime; yield return null; }
+
+                // Phase alignment. LoadAnimation plays the previous clip's _e and this clip's _s
+                // ahead of the loop, which shifts the loop's phase against wall time, so the
+                // warm-up alone does not land on phase 0. Wait until the loop itself is playing,
+                // then until it is alignLead frames from wrapping: the first kept VMD frame
+                // (recorded frame 2, after the transient frame 0 is dropped and 60fps frames
+                // are written in pairs) is captured that many frames after this loop ends
+                // (measured: CLI_PHASE below reports where it landed).
+                var an = container.UmaAnimator;
+                int.TryParse(Opt("--align-lead", "3"), out int alignLead);
+                float step = Time.deltaTime / len;
+                for (int guard = 0; guard < 100000; guard++)
+                {
+                    var infos = an.GetCurrentAnimatorClipInfo(0);
+                    bool inLoop = !an.IsInTransition(0) && infos.Length > 0 && infos[0].clip != null
+                                  && infos[0].clip.name.EndsWith(anim.Name.Substring(anim.Name.LastIndexOf('/') + 1));
+                    if (inLoop)
+                    {
+                        float frac = an.GetCurrentAnimatorStateInfo(0).normalizedTime % 1f;
+                        if (Mathf.Abs(frac + alignLead * step - 1f) <= step * 0.5f + 1e-5f) break;
+                    }
+                    yield return null;
+                }
             }
 
             var rootbone = container.transform.Find("Position");
@@ -323,13 +347,29 @@ public class CliExporter : MonoBehaviour
                 Debug.Log($"CLI_EXPORT: registered {rec.ExtraBoneCount} baked spring tracks");
             }
             yield return null;            // one frame so the animator is posed at t=0
+            {
+                // Which animator state the capture actually starts in. LoadAnimation chains the
+                // previous clip's _e and this clip's _s ahead of the loop, so a time-based
+                // warm-up can still be inside those.
+                var an = container.UmaAnimator; var st = an.GetCurrentAnimatorStateInfo(0);
+                string stName = "?";
+                foreach (var cand in new[] { "motion_1", "motion_2", "motion_s", "motion_e", "motion_t", "motion_p" })
+                    if (st.IsName(cand)) stName = cand;
+                string Clip(string k) { var c = container.OverrideController[k]; return c == null ? "-" : $"{c.name.Substring(c.name.LastIndexOf('/') + 1)}[{c.length:F2}s]"; }
+                Debug.Log($"CLI_STATE: capture starts in {stName} t={st.normalizedTime:F2} len={st.length:F2}s transition={an.IsInTransition(0)} clip_1={Clip("clip_1")} clip_2={Clip("clip_2")} clip_s={Clip("clip_s")} clip_e={Clip("clip_e")}");
+            }
             rec.StartRecording();
             // Capture a full period plus a small margin so frame P (== phase 0 of the
             // next cycle) is present; the loop trim below keeps exactly one period.
             // --seconds overrides this to record raw for external loop-finding.
             float recLen = recordSeconds > 0f ? recordSeconds : (isLoop ? len + 0.1f : len);
             float e2 = 0f;
-            while (e2 < recLen) { e2 += Time.deltaTime; yield return null; }
+            for (int i = 0; e2 < recLen; i++)
+            {
+                if (i == 3)   // recorded frame 2 (the first kept VMD frame) is captured in the FixedUpdate before this iteration
+                    Debug.Log($"CLI_PHASE: first kept frame at clip phase {container.UmaAnimator.GetCurrentAnimatorStateInfo(0).normalizedTime % 1f:F4}");
+                e2 += Time.deltaTime; yield return null;
+            }
             rec.StopRecording();
             Time.captureFramerate = prevCapture;
             Time.fixedDeltaTime = prevFixed;

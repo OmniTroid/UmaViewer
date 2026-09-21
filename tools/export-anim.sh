@@ -73,8 +73,9 @@ cp -f "$RAW/$PMXFILE" "$OUT/$PMXFILE"
 
 echo "Building seamless loop ..."
 # --period pins the loop length (in 30fps frames) instead of detecting it; for clips that
-# barely move, the detector can settle on a short sub-cycle.
-PERIODARGS=""; [ -n "$PERIOD" ] && PERIODARGS="--pmin $PERIOD --pmax $((PERIOD+1))"
+# barely move, the detector can settle on a short sub-cycle. It also starts the loop at the
+# capture start, which the player aligns to the clip's own phase 0.
+PERIODARGS=""; [ -n "$PERIOD" ] && PERIODARGS="--pmin $PERIOD --pmax $((PERIOD+1)) --start 0"
 "$PY" "$HERE/loopify_vmd.py" "$RAW/$VMDFILE" "$OUT/$VMDFILE" --tiles "$TILES" $BLINK $NOMOUTH $PERIODARGS
 rm -rf "$RAW"
 echo "Done -> $OUT/$PMXFILE + $OUT/$VMDFILE"
