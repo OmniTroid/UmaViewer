@@ -90,6 +90,7 @@ public class UISettingsExport : MonoBehaviour
         var button = row.GetComponentInChildren<Button>(true);
         button.onClick = new Button.ButtonClickedEvent();
         button.onClick.AddListener(onClick);
+        button.interactable = true;   // the template row may be disabled at runtime by its own section
         SetLabel(row, label);
         return button;
     }
