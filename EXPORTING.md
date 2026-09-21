@@ -80,6 +80,12 @@ period also starts the loop at the capture start (`loopify_vmd.py --start 0`), w
 to the clip's own frame 0 (`CLI_PHASE` reports where it landed) instead of searching for the best seam.
 Without `--period`, the seam search picks the phase.
 
+A `_s` (start) or `_e` (end) clip can be recorded on its own by naming it in `--anim`. The viewer only
+plays these inside a loop's chain (previous idle `_e`, then the clip's `_s`, then the loop), so the
+exporter plays them directly; the VMD begins at the clip's frame 0, from the rest pose. `_e` clips end,
+and `_s` clips begin, in the game's shared neutral stance (hands clasped in front), which is common to
+all characters and body types.
+
 The wrapper forwards `--pmx-name`, `--vmd-name` and `--bake-physics` to the player. `loopify_vmd.py` tiles every track it finds, so baked cloth survives the loop build; its `--seam-cloth` option also weighs those tracks when choosing the loop phase, which it otherwise picks from the humanoid bones alone.
 
 ## Cloth: simulated or baked

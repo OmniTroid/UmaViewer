@@ -255,6 +255,10 @@ public class CliExporter : MonoBehaviour
             AnimationClip clip = null;
             try { clip = anim.Get<AnimationClip>(); } catch { }
             container.LoadAnimation(anim);
+            // LoadAnimation files _s/_e clips into the transition slots without playing them:
+            // in the viewer they only run inside a loop's chain (idle _e -> clip _s -> loop).
+            // Recording one on its own plays it directly, below, once the recorder is running.
+            bool playDirect = clip != null && (clip.name.EndsWith("_s") || clip.name.EndsWith("_e"));
             // Head/eye look-at (FinalIK) aims at a camera-following target; headless
             // that target is arbitrary and won't loop, so the head pops. Export the
             // raw animation and let the consumer add look-at themselves.
@@ -334,6 +338,7 @@ public class CliExporter : MonoBehaviour
             var rootbone = container.transform.Find("Position");
             var rec = rootbone.gameObject.AddComponent<UnityHumanoidVMDRecorder>();
             rec.FixedStep = 1f / recFps;     // Initialize() applies it; it hardcodes 1/30 otherwise
+            rec.KeyReductionLevel = 1;       // every frame is a real sample; the default 2 keys the body at 15fps
             rec.Initialize();
             rec.WriteStride = recFps / 30;   // 60fps steps -> one 30fps VMD frame per two
             Debug.Log($"CLI_EXPORT: stepping physics at {recFps}fps, writing every {rec.WriteStride} frame(s)");
@@ -363,9 +368,18 @@ public class CliExporter : MonoBehaviour
             // next cycle) is present; the loop trim below keeps exactly one period.
             // --seconds overrides this to record raw for external loop-finding.
             float recLen = recordSeconds > 0f ? recordSeconds : (isLoop ? len + 0.1f : len);
+            if (playDirect) recLen += 2f * Time.deltaTime;
             float e2 = 0f;
             for (int i = 0; e2 < recLen; i++)
             {
+                // Recorded frame k is captured in the FixedUpdate before iteration k+1 and the
+                // first kept VMD frame is recorded frame 2, so a clip started here, at
+                // iteration 2, has its frame 0 captured as that first kept frame.
+                if (playDirect && i == 2)
+                {
+                    container.OverrideController["clip_2"] = clip;
+                    container.UmaAnimator.Play("motion_2", 0, 0);
+                }
                 if (i == 3)   // recorded frame 2 (the first kept VMD frame) is captured in the FixedUpdate before this iteration
                     Debug.Log($"CLI_PHASE: first kept frame at clip phase {container.UmaAnimator.GetCurrentAnimatorStateInfo(0).normalizedTime % 1f:F4}");
                 e2 += Time.deltaTime; yield return null;
