@@ -28,7 +28,26 @@ WebGL links native code statically, so every `[DllImport]` symbol must exist at 
 - **StandaloneFileBrowser** — ships its own `.jslib`; no work needed.
 - **lame** (MP3 export) — not reachable from the viewer scenes, so IL2CPP strips it. Only matters if you wire audio export into a WebGL build.
 
-## Remaining: loading game data in a browser
+## Loading game data in a browser (Chromium only)
 
-- **Data folder**: browsers have no filesystem. Pick the `Persistent` folder with the File System Access API, read bytes in JS, and feed them to the sqlite3mc DB and the asset loaders (the synchronous `System.IO` paths need an async browser-FS shim).
-- **Threading**: ~13 `Thread`/`Task.Run` sites; move viewer-path ones to coroutine/main-thread, or enable pthreads (SharedArrayBuffer + COOP/COEP headers).
+The template (`Assets/WebGLTemplates/UmaViewer/index.html`) gates startup on a folder pick:
+the user selects their `Cygames/umamusume` folder via the File System Access API before Unity
+boots. Files are read locally, nothing is uploaded. Non-Chromium browsers (no
+`showDirectoryPicker`) are told to switch.
+
+The data folder is mounted at `/uma` in Emscripten's MEMFS. Every reader opens by path
+(sqlite `meta`/`master.mdb`, `AssetBundle.LoadFromFile`, the encrypted `FileStream`), so files
+are faulted in on demand just before each synchronous open:
+
+- `Assets/Plugins/WebGL/UmaWebFS.jslib` — walks the picked directory handle, reads a file,
+  writes it into MEMFS at the same path. Async begin/poll so managed coroutines can await it.
+- `WebFileMount.cs` — `Ensure(path)` coroutine over that bridge; no-op off WebGL.
+- Hooks: `Config` pins `MainPath=/uma` / Default mode / no download; `UmaViewerMain.Start`
+  mounts the two DBs then the `livesettings`/`shader` bundles; `UmaAssetManager.PreLoadAsset`
+  mounts each bundle (and its deps) before acquiring. Unmounted synchronous loads (e.g. boot
+  icons) skip quietly rather than error.
+
+Known gaps: boot character/live icons load synchronously and are not pre-mounted, so they show
+blank until wired through a coroutine; `master.mdb` is large and lives fully in MEMFS (heap
+pressure). Threading (~13 `Thread`/`Task.Run` sites) is unrelated to the local file path;
+the runtime download path is disabled on WebGL.

@@ -40,6 +40,13 @@ public class UmaViewerMain : MonoBehaviour
         if (Config.Instance == null) new Config();
         ApplyFrameRateLimit();
 
+        // On WebGL the meta/master DBs are not in MEMFS yet; Start faults them in and then
+        // calls InitDatabase once WebFileMount is ready.
+        if (!WebFileMount.Active) InitDatabase();
+    }
+
+    private void InitDatabase()
+    {
         AbList = UmaDatabaseController.Instance.MetaEntries;
         if (AbList == null) return;
         var chara_3d = AbList.Where(ab => ab.Value.Type == UmaFileType._3d_cutt).Select(ab => ab.Value).ToList();
@@ -76,6 +83,14 @@ public class UmaViewerMain : MonoBehaviour
 
     private IEnumerator Start()
     {
+        if (WebFileMount.Active)
+        {
+            yield return WebFileMount.WaitForPick();
+            yield return WebFileMount.Ensure($"{Config.Instance.MainPath}/meta");
+            yield return WebFileMount.Ensure($"{Config.Instance.MainPath}/master/master.mdb");
+            InitDatabase();
+        }
+
         if (AbList == null) yield break;
         int loadingStep = 0;
         int loadingStepsTotal = 10;
@@ -201,6 +216,7 @@ public class UmaViewerMain : MonoBehaviour
         var asset = AbList["livesettings"];
         if (asset != null)
         {
+            if (WebFileMount.Active) yield return UmaAssetManager.EnsureBundleFiles(asset);
             string filePath = asset.FilePath;
             if (File.Exists(filePath))
             {
@@ -250,6 +266,7 @@ public class UmaViewerMain : MonoBehaviour
         loadingUI.LoadingProgressChange(-1, -1);
 
         //Load Shader First
+        if (WebFileMount.Active) yield return UmaAssetManager.EnsureBundleFiles(AbList["shader"]);
         var shaders = UmaAssetManager.LoadAssetBundle(AbList["shader"], true);
         Builder.ShaderList = new List<Shader>(shaders.LoadAllAssets<Shader>()); 
         Gallop.ShaderManager.InitManager();

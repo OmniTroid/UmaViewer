@@ -133,6 +133,8 @@ public class UmaAssetManager : MonoBehaviour
         for (int i = 0; i < loadItems.Count; i++)
         {
             LoadItem item = loadItems[i];
+            if (WebFileMount.Active)
+                yield return WebFileMount.Ensure(item.Entry.Path);
             AcquireOne(item.Entry, item.NeverUnload);
 
             completed++;
@@ -145,6 +147,16 @@ public class UmaAssetManager : MonoBehaviour
         OnLoadProgressChange?.Invoke(-1, loadItems.Count, null);
         LoadCoroutine = null;
         onDone?.Invoke();
+    }
+
+    // WebGL: fault an entry and its transitive dependencies into MEMFS so a following
+    // synchronous LoadAssetBundle finds every file on disk. Call from a coroutine.
+    public static IEnumerator EnsureBundleFiles(UmaDatabaseEntry entry)
+    {
+        if (!WebFileMount.Active || entry == null || instance == null) yield break;
+        foreach (var request in SearchAB(UmaViewerMain.Instance, entry))
+            if (request != null)
+                yield return WebFileMount.Ensure(request.Path);
     }
 
     public static AssetBundle LoadAssetBundle(
@@ -217,6 +229,10 @@ public class UmaAssetManager : MonoBehaviour
 
         if (!File.Exists(filePath))
         {
+            // WebGL faults files in on the coroutine load paths; a synchronous miss here just
+            // means this bundle (e.g. a boot icon) was not pre-mounted. Skip it quietly.
+            if (WebFileMount.Active)
+                return false;
             Debug.LogError($"{entry.Name} - {filePath} does not exist");
             UmaViewerUI.Instance?.ShowMessage(
                 $"{entry.Name} - {filePath} does not exist",

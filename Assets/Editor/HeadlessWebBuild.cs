@@ -8,6 +8,8 @@ public static class HeadlessWebBuild
     // builds). Outputs a hostable folder: Build/Web/index.html + Build/Web/Build/*.
     public static void Build()
     {
+        PlayerSettings.WebGL.template = "PROJECT:UmaViewer";
+
         var options = new BuildPlayerOptions
         {
             scenes = new[] { "Assets/Scenes/Version2.unity", "Assets/Scenes/LiveScene.unity" },
