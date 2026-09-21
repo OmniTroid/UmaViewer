@@ -169,7 +169,7 @@ public static class MotionExporter
         container.SetHeadTracking(false);
         container.EnableEyeTracking = false;
         float len = (clip != null && clip.length > 0.01f) ? clip.length : 5f;
-        Debug.Log($"CLI_CLIP: {anim.Name} length={len:F3}s ({Mathf.RoundToInt(len * 30f)} frames at 30fps) loop={isLoop} camera={(cam != null ? camEntry.Name : "none")}"
+        Debug.Log($"CLI_CLIP: {anim.Name} length={len:F3}s ({Mathf.RoundToInt(len * 30f)} frames at 30fps) loop={isLoop} camera={(cam != null ? camEntry.Name : "none")} rootMotion={(probe.Position != null)}"
                   + (chain ? $" chain={probe.Chain.Count} cuts ({chainLen:F2}s)" : ""));
 
         // Deterministic capture: lock game time to a fixed step (frame count and pose sampling
@@ -271,6 +271,11 @@ public static class MotionExporter
             rec = rootbone.gameObject.AddComponent<UnityHumanoidVMDRecorder>();
             rec.FixedStep = 1f / recFps;     // Initialize() applies it; it hardcodes 1/30 otherwise
             rec.KeyReductionLevel = 1;       // every frame is a real sample; the default 2 keys the body at 15fps
+            // Root motion: the _pos companion moves the character's root (the animator's own
+            // transform), which the recorder writes as センター only when it records the root in
+            // world space; relative to the moving root it reads as zero. Loops have no _pos and
+            // stay in place, as before.
+            rec.UseAbsoluteCoordinateSystem = probe.Position != null;
             rec.Initialize();
             rec.WriteStride = recFps / 30;   // 60fps steps -> one 30fps VMD frame per two
             Debug.Log($"CLI_EXPORT: stepping physics at {recFps}fps, writing every {rec.WriteStride} frame(s)");
