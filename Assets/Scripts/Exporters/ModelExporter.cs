@@ -31,7 +31,16 @@ public class ModelExporter
         container.SetDynamicBoneEnable(false);
         container.EnablePhysics = false;
         container.UmaFaceAnimator?.Rebind();
-        container.UmaAnimator?.Rebind();
+        // Body rest pose, identical to the one the VMD recorder measures its rotations from
+        // (UnityHumanoidVMDRecorder.Initialize): Rebind clears every animated bone to the default
+        // pose, then ResetBodyPose/UpBodyReset put the body bones at their runtime positions.
+        // Both steps matter -- InitBoneTransform covers only the body-skinned bones, so without
+        // the Rebind any other bone keeps whatever pose was last animated.
+        var bodyAnimator = container.UmaAnimator;
+        bool animatorWasEnabled = bodyAnimator != null && bodyAnimator.enabled;
+        if (bodyAnimator != null) { bodyAnimator.Rebind(); bodyAnimator.enabled = false; }
+        container.ResetBodyPose();
+        container.UpBodyReset();
         container.EnableEyeTracking = false;
         container.FaceDrivenKeyTarget?.FacialResetAll();
         
@@ -56,6 +65,7 @@ public class ModelExporter
         {
             RemoveBillboard(container);
             ClearBlendShape(container);
+            if (bodyAnimator != null) bodyAnimator.enabled = animatorWasEnabled;
         }
 
         UmaViewerUI.Instance.ShowMessage($"PMX Save at {path}", UIMessageType.Success);

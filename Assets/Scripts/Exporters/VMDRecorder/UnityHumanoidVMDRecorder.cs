@@ -229,6 +229,10 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
         var characterContainer = GetComponentInParent<UmaContainerCharacter>();
         var animator = characterContainer.UmaAnimator;
         var state = animator.GetCurrentAnimatorStateInfo(0);
+        // Reference pose, identical to the one ModelExporter binds the PMX in: Rebind clears every
+        // animated bone (InitBoneTransform covers only the body-skinned ones), then the body bones
+        // go to their runtime positions.
+        animator.Rebind();
         animator.enabled = false;
 
         // Set to T-Pose
