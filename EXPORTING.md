@@ -103,7 +103,11 @@ A body motion is `anm_<kind>_<owner>_<motion>[_<variant>]_<part>`. The owner is 
 Companions live in sibling folders: `_face` and `_ear` (facial), `_pos` (root motion), `_cam`
 (a scripted camera). A camera is independent of the part kind: some one-shots have one, some do
 not, loops never do. When a motion has a `_cam`, the export records it into the same VMD's camera
-section (`--no-camera` skips it). Note the viewer drops the character height scale while a camera
+section (`--no-camera` skips it). A card cut-in (`anm_cti_crd..._01`) is one cut of a chain the
+viewer plays through (each cut loads the next at 99% of its length); naming any cut records the
+chain from there to the last cut into one VMD, camera cuts included (`--no-chain` records that cut
+alone). Each cut is switched at its exact last frame and its first frame is held, physics running,
+before recording resumes, so the cloth starts each cut settled in the new pose. Note the viewer drops the character height scale while a camera
 clip plays, so such a motion is recorded at the base height.
 
 Any part can be exported by naming it in `--anim`. Non-loop clips are recorded from their frame 0

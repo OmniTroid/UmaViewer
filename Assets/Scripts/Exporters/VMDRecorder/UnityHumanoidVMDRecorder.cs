@@ -276,9 +276,12 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
     /// numbered the way the bone frames will be after any trim. Empty = no camera track.
     public List<byte[]> CameraFrames = new List<byte[]>();
 
+    /// While set, frames are neither saved nor counted; recording resumes seamlessly.
+    public bool Paused;
+
     private void FixedUpdate()
     {
-        if (IsRecording && !IsLive)
+        if (IsRecording && !IsLive && !Paused)
         {
             if (CaptureStride > 1 && (strideTick++ % CaptureStride) != 0) { return; }
             SaveFrame();

@@ -237,6 +237,7 @@ public class CliExporter : MonoBehaviour
             {
                 BakePhysics = bakePhysics, RecordSeconds = recordSeconds, DropMouth = dropMouth, AddBlink = addBlink,
                 IncludeCamera = !Flag("--no-camera"),   // a _cam companion is recorded into the same VMD unless told not to
+                FollowChain = !Flag("--no-chain"),      // a card cut-in records its whole cut chain unless told not to
             };
             int.TryParse(Opt("--physics-fps", "60"), out opt.PhysicsFps);
             float.TryParse(Opt("--warmup", "2"), out opt.WarmupPeriods);

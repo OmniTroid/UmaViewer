@@ -30,6 +30,11 @@ public static class MotionProbe
         // Companions of the asked-about part.
         public UmaDatabaseEntry Facial, Ear, Camera, Position;
 
+        // Card cut-ins (anm_cti_crd..._NN) are a chain: the viewer loads cut NN+1 when cut NN
+        // reaches 99% of its length. The chain from the asked-about cut onward, itself first.
+        public List<UmaDatabaseEntry> Chain = new List<UmaDatabaseEntry>();
+        public float ChainSeconds = -1f;
+
         public float Seconds = -1f;             // asked-about clip, when loadable
         public float LoopSeconds = -1f, StartSeconds = -1f, EndSeconds = -1f, CameraSeconds = -1f;
 
@@ -38,6 +43,7 @@ public static class MotionProbe
         public bool IsOneShot => Part == "";
         public bool HasPreanim => Start != null;
         public bool HasCamera => Camera != null;
+        public bool IsChain => Chain.Count > 1;
     }
 
     public static Result Probe(UmaViewerMain main, string query, bool loadClips = true)
@@ -110,9 +116,28 @@ public static class MotionProbe
         r.Camera = Find(name.Replace("/body", "/camera") + "_cam");
         r.Position = Find(name.Replace("/body", "/position") + "_pos");
 
+        // Cut chain, exactly as UmaContainerCharacter.LoadAnimation builds it for "_cti_crd":
+        // anm_cti_crd112702_001_01 -> ..._02 -> ... while the asset exists.
+        r.Chain.Add(r.Entry);
+        if (file.Contains("_cti_crd"))
+        {
+            var param = file.Split('_');
+            if (param.Length > 4 && int.TryParse(param[4], out int index))
+            {
+                string dir = name.Substring(0, name.Length - file.Length);
+                for (int i = index + 1; ; i++)
+                {
+                    var next = Find($"{dir}{param[0]}_{param[1]}_{param[2]}_{param[3]}_{i.ToString().PadLeft(2, '0')}");
+                    if (next == null) break;
+                    r.Chain.Add(next);
+                }
+            }
+        }
+
         if (loadClips)
         {
             r.Seconds = ClipSeconds(r.Entry);
+            if (r.IsChain) r.ChainSeconds = r.Chain.Sum(e => Mathf.Max(0f, ClipSeconds(e)));
             r.LoopSeconds = ClipSeconds(r.Loop);
             r.StartSeconds = ClipSeconds(r.Start);
             r.EndSeconds = ClipSeconds(r.End);
@@ -144,6 +169,8 @@ public static class MotionProbe
         sb.AppendLine($"  end (_e):     {Short(r.End)}{Sec(r.EndSeconds)}");
         if (r.Pose != null || r.ShortLoop != null) sb.AppendLine($"  also: pose (static hold of the final posture) {Short(r.Pose)} | sl (alternate start, purpose unconfirmed) {Short(r.ShortLoop)}");
         sb.AppendLine($"  camera: {Short(r.Camera)}{Sec(r.CameraSeconds)} | position: {Short(r.Position)} | facial: {Short(r.Facial)} | ear: {Short(r.Ear)}");
+        if (r.IsChain)
+            sb.AppendLine($"  chain: {r.Chain.Count} cuts, {Short(r.Chain[0])} .. {Short(r.Chain[r.Chain.Count - 1])}{Sec(r.ChainSeconds)}; each cut has its own camera/face/ear/position");
         return sb.ToString().TrimEnd();
     }
 }

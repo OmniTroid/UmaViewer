@@ -42,6 +42,9 @@ public static class MotionExporter
         /// When the motion has a scripted camera (_cam companion), record it into the same
         /// VMD's camera section. Only one-shots and some transitions have one; loops never do.
         public bool IncludeCamera = true;
+        /// A card cut-in names one cut of a chain (..._01, _02, ...). Record the whole chain from
+        /// this cut to the last, the way the viewer plays it, into one VMD.
+        public bool FollowChain = true;
     }
 
     /// How long a non-loop clip's first frame is held, physics running, before capture.
@@ -129,7 +132,26 @@ public static class MotionExporter
         // viewer also drops the character height scale while a camera clip plays (the clips are
         // framed for the base model), so this motion is recorded at that height.
         var builder = UmaViewerBuilder.Instance;
-        var camEntry = opt.IncludeCamera ? MotionProbe.Probe(UmaViewerMain.Instance, anim.Name, loadClips: false).Camera : null;
+        var probe = MotionProbe.Probe(UmaViewerMain.Instance, anim.Name, loadClips: false);
+        var camEntry = opt.IncludeCamera ? probe.Camera : null;
+        // A chain is driven from here rather than by the viewer's own chain events: those fire
+        // inside the animator update and Rebind the model, which records one frame of the rest
+        // pose per cut and whips the cloth. Each cut is switched at its exact last frame, and its
+        // first frame is held with physics running before recording resumes.
+        bool chain = opt.FollowChain && probe.IsChain && !isLoop;
+        var chainClips = new List<AnimationClip>();
+        float chainLen = 0f;
+        if (chain)
+        {
+            foreach (var e in probe.Chain)
+            {
+                AnimationClip c = null; try { c = e.Get<AnimationClip>(); } catch { }
+                chainClips.Add(c);
+                if (c != null) chainLen += c.length;
+            }
+        }
+        void StripChainEvents() { foreach (var c in chainClips) if (c != null && c.events.Length > 0) c.events = new AnimationEvent[0]; }
+        if (chain) StripChainEvents();   // LoadAnimation(anim) above just added the viewer's chain events
         Camera cam = camEntry != null && builder != null ? builder.AnimationCamera : null;
         Animator camAnimator = cam != null ? builder.AnimationCameraAnimator : null;
         if (cam != null && !cam.enabled)
@@ -146,7 +168,8 @@ public static class MotionExporter
         container.SetHeadTracking(false);
         container.EnableEyeTracking = false;
         float len = (clip != null && clip.length > 0.01f) ? clip.length : 5f;
-        Debug.Log($"CLI_CLIP: {anim.Name} length={len:F3}s ({Mathf.RoundToInt(len * 30f)} frames at 30fps) loop={isLoop} camera={(cam != null ? camEntry.Name : "none")}");
+        Debug.Log($"CLI_CLIP: {anim.Name} length={len:F3}s ({Mathf.RoundToInt(len * 30f)} frames at 30fps) loop={isLoop} camera={(cam != null ? camEntry.Name : "none")}"
+                  + (chain ? $" chain={probe.Chain.Count} cuts ({chainLen:F2}s)" : ""));
 
         // Deterministic capture: lock game time to a fixed step (frame count and pose sampling
         // no longer depend on wall-clock speed), and force the job system single-threaded so
@@ -274,9 +297,51 @@ public static class MotionExporter
             // to record raw for external loop-finding.
             float recLen = opt.RecordSeconds > 0f ? opt.RecordSeconds : (isLoop ? len + 0.1f : len);
             if (playDirect) recLen += 2f * Time.deltaTime;
+            if (chain) recLen = float.MaxValue;   // the loop below ends the capture after the last cut
             float e2 = 0f;
-            for (int i = 0; e2 < recLen; i++)
+            bool chainDone = false;
+            // Chain bookkeeping, in loop iterations: a clip started at iteration k has its frame 0
+            // captured as recorded frame k, so cut c started at iteration s occupies s .. s+steps-1
+            // and the next cut starts at iteration s+steps.
+            int cutIndex = 0, cutStart = 2, holdEnd = -1;
+            int CutSteps(int c) => Mathf.RoundToInt(chainClips[c].length * recFps);
+            bool camPausedLastFixed = false;
+            for (int i = 0; e2 < recLen && !chainDone; i++)
             {
+                // The camera pose visible now is what the recorder's FixedUpdate captured this
+                // frame as recorded frame i-1, unless recording was paused for that FixedUpdate.
+                if (cam != null && i >= 1 && !camPausedLastFixed) camSamples.Add(CameraSample.Of(cam));
+                if (chain && i > 2)
+                {
+                    if (holdEnd >= 0 && i == holdEnd)
+                    {
+                        // Hold over: restart the cut at its frame 0 in sync with recording.
+                        SetSpeeds(1f);
+                        StartClips();
+                        rec.Paused = false;
+                        cutStart = i; holdEnd = -1;
+                    }
+                    else if (holdEnd < 0 && i == cutStart + CutSteps(cutIndex))
+                    {
+                        if (cutIndex + 1 >= chainClips.Count) { chainDone = true; }
+                        else
+                        {
+                            // Switch to the next cut before this frame's animator update, then hold its
+                            // first frame (physics running, recording paused) so the cloth settles in
+                            // the new pose instead of being whipped by the cut.
+                            cutIndex++;
+                            clip = chainClips[cutIndex];
+                            container.LoadAnimation(probe.Chain[cutIndex]);
+                            StripChainEvents();
+                            StartClips();
+                            SetSpeeds(0f);
+                            rec.Paused = true;
+                            holdEnd = i + Mathf.RoundToInt(HoldSeconds * recFps);
+                            Debug.Log($"CLI_EXPORT: cut {cutIndex + 1}/{chainClips.Count} {probe.Chain[cutIndex].Name.Substring(probe.Chain[cutIndex].Name.LastIndexOf('/') + 1)} at recorded frame {i}, holding {HoldSeconds:0.00}s");
+                        }
+                    }
+                }
+                camPausedLastFixed = rec.Paused;
                 // Recorded frame k is captured in the FixedUpdate before iteration k+1 and the
                 // first kept VMD frame is recorded frame 2, so a clip started here, at
                 // iteration 2, has its frame 0 captured as that first kept frame.
@@ -285,9 +350,6 @@ public static class MotionExporter
                     SetSpeeds(1f);
                     StartClips();
                 }
-                // The camera pose visible now is what the recorder's FixedUpdate captured this
-                // frame as recorded frame i-1.
-                if (cam != null && i >= 1) camSamples.Add(CameraSample.Of(cam));
                 if (i == 3)   // recorded frame 2 (the first kept VMD frame) is captured in the FixedUpdate before this iteration
                     Debug.Log($"CLI_PHASE: first kept frame at clip phase {animator.GetCurrentAnimatorStateInfo(0).normalizedTime % 1f:F4}");
                 e2 += Time.deltaTime; yield return null;
@@ -315,7 +377,7 @@ public static class MotionExporter
                 // Match the bone frames' numbering: recorded 60fps frame k -> VMD frame k/WriteStride,
                 // then the transient frame 0 is dropped and everything shifts down by one; a loop
                 // keeps only one period.
-                int keep = opt.RecordSeconds > 0f ? int.MaxValue : Mathf.RoundToInt(len * 30f);
+                int keep = opt.RecordSeconds > 0f ? int.MaxValue : chain ? Mathf.RoundToInt(chainLen * 30f) : Mathf.RoundToInt(len * 30f);
                 for (int k = 0; k < camSamples.Count; k += rec.WriteStride)
                 {
                     int j = k / rec.WriteStride;
@@ -331,7 +393,7 @@ public static class MotionExporter
             // clip keeps exactly its own frames (a card cut-in's chain event at 0.99*len would
             // otherwise put the next cut's first pose on the frame after). Raw captures
             // (RecordSeconds) keep everything after frame 0.
-            int period = opt.RecordSeconds > 0f ? int.MaxValue : Mathf.RoundToInt(len * 30f);
+            int period = opt.RecordSeconds > 0f ? int.MaxValue : chain ? Mathf.RoundToInt(chainLen * 30f) : Mathf.RoundToInt(len * 30f);
             try { TrimLoop(vmdPath, period, opt.DropMouth, opt.AddBlink); }
             catch (Exception ex) { Debug.LogWarning("CLI_EXPORT: loop trim skipped: " + ex); }
         }
