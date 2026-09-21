@@ -944,6 +944,7 @@ public class UmaViewerUI : MonoBehaviour
                         }
                         list.Add(Main.AbList["3d/animator/drivenkeylocator"]);
                         list.Add(Main.AbList[$"3d/motion/event/body/chara/chr{achara.Id}_00/anm_eve_chr{achara.Id}_00_idle01_loop"]);
+                        AddCommonFaceBundles(list);
 
                         Builder.UnloadUma();
                         //UmaAssetManager.UnloadAllBundle(true);
@@ -1009,6 +1010,7 @@ public class UmaViewerUI : MonoBehaviour
                         {
                             list.Add(motion_entry);
                         }
+                        AddCommonFaceBundles(list);
 
                         Builder.UnloadUma();
                         //UmaAssetManager.UnloadAllBundle(true);
@@ -1204,6 +1206,26 @@ public class UmaViewerUI : MonoBehaviour
             HighlightChildImage(parent, container);
             StartCoroutine(LoadAnimationRoutine(entry));
         });
+    }
+
+    // Shared common bundles LoadFaceMorph always instantiates (eye-emotion effects and tears).
+    // They aren't part of any character's dependency graph, so mount them with the model or they
+    // load as null on WebGL and the effects get skipped.
+    static readonly string[] CommonFaceBundlePaths =
+    {
+        "3d/effect/charaemotion/pfb_eff_chr_emo_eye_000",
+        "3d/effect/charaemotion/pfb_eff_chr_emo_eye_001",
+        "3d/effect/charaemotion/pfb_eff_chr_emo_eye_002",
+        "3d/effect/charaemotion/pfb_eff_chr_emo_eye_003",
+        "3d/chara/common/tear/tear000/pfb_chr_tear000",
+        "3d/chara/common/tear/tear001/pfb_chr_tear001",
+    };
+
+    void AddCommonFaceBundles(List<UmaDatabaseEntry> list)
+    {
+        foreach (var path in CommonFaceBundlePaths)
+            if (Main.AbList.TryGetValue(path, out var entry) && entry != null)
+                list.Add(entry);
     }
 
     IEnumerator LoadAnimationRoutine(UmaDatabaseEntry entry)
