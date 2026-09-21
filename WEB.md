@@ -2,22 +2,22 @@
 
 Compile UmaViewer to a hostable WebGL page. WebGL is IL2CPP-only (already the Standalone default).
 
-## Build
+## Build and run
 
 Needs the "WebGL Build Support" editor module (Unity Hub → add modules).
 
 ```
-bash tools/build-web.sh          # -> Build/Web/ (serve: cd Build/Web && python3 -m http.server)
+bash tools/build-web.sh      # build -> Build/Web/ (Assets/Editor/HeadlessWebBuild.cs)
+python3 tools/serve-web.py   # serve  -> http://localhost:8000
 ```
 
-Uses `Assets/Editor/HeadlessWebBuild.cs`.
+WebGL can't run from `file://`, so serve over HTTP. Open the URL in a Chromium browser,
+click "Select data folder", and pick your `Cygames/umamusume` folder. Files are read locally;
+nothing is uploaded. The folder pick needs a secure context, which localhost satisfies.
 
-The build links and produces a hostable page. Serve it over HTTP (WebGL can't run from
-`file://`):
-
-```
-cd Build/Web && python3 -m http.server   # then open http://localhost:8000
-```
+`serve-web.py` sets the gzip and wasm headers so both build compression modes work; the build
+also enables decompression fallback, so a plain `python3 -m http.server` from `Build/Web` works
+too.
 
 ## Native plugins on WebGL (all resolved)
 

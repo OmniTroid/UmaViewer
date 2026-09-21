@@ -29,7 +29,7 @@ echo "Building Build/Web  (log: $LOG)"
   -executeMethod HeadlessWebBuild.Build -logFile "$(winpath "$LOG")" || true
 
 if grep -q "BUILD_OK" "$LOG"; then
-  echo "OK -> $REPO/Build/Web  (serve it: cd Build/Web && python3 -m http.server)"
+  echo "OK -> $REPO/Build/Web  (serve it: python3 tools/serve-web.py)"
 else
   echo "BUILD FAILED."
   if grep -q "error CS" "$LOG"; then

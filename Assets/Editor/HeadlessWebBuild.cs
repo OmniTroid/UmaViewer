@@ -9,6 +9,9 @@ public static class HeadlessWebBuild
     public static void Build()
     {
         PlayerSettings.WebGL.template = "PROJECT:UmaViewer";
+        // Decompress gzipped build files in the loader so any static host works, even one
+        // that doesn't send Content-Encoding: gzip (e.g. python3 -m http.server).
+        PlayerSettings.WebGL.decompressionFallback = true;
 
         var options = new BuildPlayerOptions
         {
