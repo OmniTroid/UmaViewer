@@ -12,17 +12,23 @@ bash tools/build-web.sh          # -> Build/Web/ (serve: cd Build/Web && python3
 
 Uses `Assets/Editor/HeadlessWebBuild.cs`.
 
-## Native plugins on WebGL
+The build links and produces a hostable page. Serve it over HTTP (WebGL can't run from
+`file://`):
 
-WebGL links native code statically and resolves P/Invoke through `__Internal`, so every
-`[DllImport]` symbol must exist at link time. Status per plugin:
+```
+cd Build/Web && python3 -m http.server   # then open http://localhost:8000
+```
 
-- **CySpring** — done. The managed `CySpringSolver` runs on WebGL (`CySpringNative.isNative` is false there); `Assets/Plugins/WebGL/CySpring.jslib` stubs the unused native symbols so the link succeeds.
-- **sqlite3mc** (decrypts the `meta` DB) — **required**, the binding is set to `__Internal` (`Sqlite3MC.cs`); build the [SQLite3MultipleCiphers](https://github.com/utelle/SQLite3MultipleCiphers) amalgamation with Emscripten and add it as a WebGL plugin under `Assets/Plugins/WebGL/`. `Mono.Data.Sqlite`'s `sqlite3_*` imports resolve to the same statically-linked lib.
-- **lame** (MP3 export) — not needed by a viewer; stub it (a jslib like CySpring's) or `#if !UNITY_WEBGL` the audio-export code.
-- **StandaloneFileBrowser** (native file dialog) — replace with a browser picker (File System Access API) via a jslib.
+## Native plugins on WebGL (all resolved)
 
-## Runtime work (loading game data in a browser)
+WebGL links native code statically, so every `[DllImport]` symbol must exist at link time.
+
+- **CySpring** — the managed `CySpringSolver` runs (`CySpringNative.isNative` is false on WebGL); `Assets/Plugins/WebGL/CySpring.jslib` stubs the unused native symbols.
+- **sqlite3mc** (decrypts the `meta` DB) — `Assets/Plugins/WebGL/libsqlite3mc.a`, the [SQLite3MultipleCiphers](https://github.com/utelle/SQLite3MultipleCiphers) amalgamation compiled with Unity's Emscripten (`tools/build-sqlite3mc-wasm.sh`). Both `Sqlite3MC.cs` (`__Internal`) and `Mono.Data.Sqlite`'s `sqlite3_*` imports resolve to it.
+- **StandaloneFileBrowser** — ships its own `.jslib`; no work needed.
+- **lame** (MP3 export) — not reachable from the viewer scenes, so IL2CPP strips it. Only matters if you wire audio export into a WebGL build.
+
+## Remaining: loading game data in a browser
 
 - **Data folder**: browsers have no filesystem. Pick the `Persistent` folder with the File System Access API, read bytes in JS, and feed them to the sqlite3mc DB and the asset loaders (the synchronous `System.IO` paths need an async browser-FS shim).
 - **Threading**: ~13 `Thread`/`Task.Run` sites; move viewer-path ones to coroutine/main-thread, or enable pthreads (SharedArrayBuffer + COOP/COEP headers).
