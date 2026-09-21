@@ -1127,6 +1127,7 @@ public string[] NormalBodyKeywords  = new[] { "skin", "body", "bdy", "face", "he
         if (UmaViewerMain.Instance.AbList.TryGetValue(value, out UmaDatabaseEntry entry))
         {
             AssetBundle assetBundle = UmaAssetManager.LoadAssetBundle(entry, true);
+            if (assetBundle == null) return null;
             if (assetBundle.Contains($"chr_icon_{id}"))
             {
                 Texture2D texture = (Texture2D)assetBundle.LoadAsset($"chr_icon_{id}");
@@ -1145,6 +1146,7 @@ public string[] NormalBodyKeywords  = new[] { "skin", "body", "bdy", "face", "he
         {
             string path = entry.FilePath;
             AssetBundle assetBundle = UmaAssetManager.LoadAssetBundle(entry, true);
+            if (assetBundle == null) return null;
             if (assetBundle.Contains($"mob_chr_icon_{id}_000001_01"))
             {
                 Texture2D texture = (Texture2D)assetBundle.LoadAsset($"mob_chr_icon_{id}_000001_01");
@@ -1159,6 +1161,7 @@ public string[] NormalBodyKeywords  = new[] { "skin", "body", "bdy", "face", "he
     public Sprite LoadSprite(UmaDatabaseEntry item)
     {
         AssetBundle assetBundle = UmaAssetManager.LoadAssetBundle(item, true);
+        if (assetBundle == null) return null;
         Texture2D texture = (Texture2D)assetBundle.LoadAsset(assetBundle.GetAllAssetNames()[0]);
         Sprite sprite = Sprite.Create(texture, new Rect(0, 0, texture.width, texture.height), Vector2.zero);
         UmaAssetManager.UnloadAssetBundle(item, false);
@@ -1172,6 +1175,7 @@ public string[] NormalBodyKeywords  = new[] { "skin", "body", "bdy", "face", "he
         if (UmaViewerMain.Instance.AbList.TryGetValue(value, out UmaDatabaseEntry entry))
         {
             AssetBundle assetBundle = UmaAssetManager.LoadAssetBundle(entry, true);
+            if (assetBundle == null) return null;
             if (assetBundle.Contains($"jacket_icon_l_{musicid}"))
             {
                 Texture2D texture = (Texture2D)assetBundle.LoadAsset($"jacket_icon_l_{musicid}");

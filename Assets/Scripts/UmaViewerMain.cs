@@ -260,9 +260,12 @@ public class UmaViewerMain : MonoBehaviour
         //Load Shader First
         if (WebFileMount.Active) yield return UmaAssetManager.EnsureBundleFiles(AbList["shader"]);
         var shaders = UmaAssetManager.LoadAssetBundle(AbList["shader"], true);
-        Builder.ShaderList = new List<Shader>(shaders.LoadAllAssets<Shader>()); 
-        Gallop.ShaderManager.InitManager();
-        Gallop.ShaderManager.WarmupDofBloomShader();
+        if (shaders != null)
+        {
+            Builder.ShaderList = new List<Shader>(shaders.LoadAllAssets<Shader>());
+            Gallop.ShaderManager.InitManager();
+            Gallop.ShaderManager.WarmupDofBloomShader();
+        }
     }
 
     private static bool TryParseEnglishNames(
