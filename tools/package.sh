@@ -25,9 +25,12 @@ DEST="$REPO/dist/UmaViewer-$PLATFORM-$SHA.zip"
 mkdir -p "$REPO/dist"
 rm -f "$DEST"
 
-# -y keeps symlinks as symlinks (the mac .app bundle needs them).
+# The Windows player ships a *_BurstDebugInformation_DoNotShip folder of debug symbols
+# that Unity says not to distribute; it roughly doubles the archive.
+# -y keeps symlinks as symlinks, which only the mac .app bundle needs -- and the Windows
+# build of zip is compiled without symlink support and rejects the flag.
 if [ "$MODE" = contents ]; then
-  (cd "$OUT" && zip -r -y -q "$DEST" .)
+  (cd "$OUT" && zip -r -q "$DEST" . -x '*_BurstDebugInformation_DoNotShip/*')
 else
   (cd "$(dirname "$OUT")" && zip -r -y -q "$DEST" "$(basename "$OUT")")
 fi
