@@ -8,6 +8,15 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 VER="2022.3.62f3"
 
+# --release: plain release player. Default is a Development build for local debugging.
+UMA_ARGS=""
+for arg in "$@"; do
+  case "$arg" in
+    --release) UMA_ARGS="--release" ;;
+    *) echo "Unknown option: $arg" >&2; exit 2 ;;
+  esac
+done
+
 # Unity.exe is a native Windows binary: hand it Windows paths, not MSYS ones.
 winpath() { if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else printf %s "$1"; fi; }
 
@@ -45,7 +54,7 @@ mkdir -p "$REPO/logs"
 LOG="$REPO/logs/player-build-win.log"
 echo "Building Build/Windows/UmaViewer.exe  (log: $LOG)"
 "$UNITY" -quit -batchmode -nographics -projectPath "$(winpath "$REPO")" -buildTarget Win64 \
-  -executeMethod HeadlessWinBuild.BuildMono -logFile "$(winpath "$LOG")" || true
+  -executeMethod HeadlessWinBuild.BuildMono $UMA_ARGS -logFile "$(winpath "$LOG")" || true
 
 if grep -q "BUILD_OK" "$LOG"; then
   echo "OK -> $REPO/Build/Windows/UmaViewer.exe"
