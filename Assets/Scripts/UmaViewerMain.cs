@@ -40,9 +40,9 @@ public class UmaViewerMain : MonoBehaviour
         if (Config.Instance == null) new Config();
         ApplyFrameRateLimit();
 
-        // On WebGL the meta/master DBs are not in MEMFS yet; Start faults them in and then
-        // calls InitDatabase once WebFileMount is ready.
-        if (!WebFileMount.Active) InitDatabase();
+        // On WebGL the meta/master DBs are faulted into MEMFS in Emscripten preRun
+        // (UmaDBPreload.jspre) before any script runs, so this open works here too.
+        InitDatabase();
     }
 
     private void InitDatabase()
@@ -83,14 +83,6 @@ public class UmaViewerMain : MonoBehaviour
 
     private IEnumerator Start()
     {
-        if (WebFileMount.Active)
-        {
-            yield return WebFileMount.WaitForPick();
-            yield return WebFileMount.Ensure($"{Config.Instance.MainPath}/meta");
-            yield return WebFileMount.Ensure($"{Config.Instance.MainPath}/master/master.mdb");
-            InitDatabase();
-        }
-
         if (AbList == null) yield break;
         int loadingStep = 0;
         int loadingStepsTotal = 10;

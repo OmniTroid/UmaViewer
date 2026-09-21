@@ -11,18 +11,11 @@ public static class WebFileMount
     public const string MountRoot = "/uma";
 
 #if UNITY_WEBGL && !UNITY_EDITOR
-    [DllImport("__Internal")] private static extern int UmaFS_Ready();
     [DllImport("__Internal")] private static extern int UmaFS_IsMounted(string path);
     [DllImport("__Internal")] private static extern int UmaFS_BeginMount(string path);
     [DllImport("__Internal")] private static extern int UmaFS_PollMount(int id);
 
     public static bool Active => true;
-    public static bool Ready => UmaFS_Ready() == 1;
-
-    public static IEnumerator WaitForPick()
-    {
-        while (UmaFS_Ready() != 1) yield return null;
-    }
 
     public static IEnumerator Ensure(string path)
     {
@@ -37,8 +30,6 @@ public static class WebFileMount
     }
 #else
     public static bool Active => false;
-    public static bool Ready => true;
-    public static IEnumerator WaitForPick() { yield break; }
     public static IEnumerator Ensure(string path) { yield break; }
     public static IEnumerator EnsureMany(IEnumerable<string> paths) { yield break; }
 #endif

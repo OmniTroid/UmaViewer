@@ -5,10 +5,6 @@
 mergeInto(LibraryManager.library, {
   $UmaFSState: { reqs: {}, nextId: 1 },
 
-  UmaFS_Ready: function () {
-    return (typeof window !== 'undefined' && window.__umaFS && window.__umaFS.ready) ? 1 : 0;
-  },
-
   UmaFS_IsMounted: function (pathPtr) {
     var path = UTF8ToString(pathPtr);
     try { return FS.analyzePath(path).exists ? 1 : 0; } catch (e) { return 0; }

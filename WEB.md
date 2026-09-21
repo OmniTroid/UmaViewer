@@ -39,13 +39,17 @@ The data folder is mounted at `/uma` in Emscripten's MEMFS. Every reader opens b
 (sqlite `meta`/`master.mdb`, `AssetBundle.LoadFromFile`, the encrypted `FileStream`), so files
 are faulted in on demand just before each synchronous open:
 
-- `Assets/Plugins/WebGL/UmaWebFS.jslib` — walks the picked directory handle, reads a file,
+- `Assets/Plugins/WebGL/UmaDBPreload.jspre` — the `meta` and `master.mdb` DBs are opened by
+  path very early (in `Awake`, before Start ordering settles), so they are faulted in during
+  Emscripten `preRun` (an `addRunDependency` holds boot until they land) rather than from a
+  coroutine.
+- `Assets/Plugins/WebGL/UmaWebFS.jslib` — walks the picked directory handle, reads a bundle,
   writes it into MEMFS at the same path. Async begin/poll so managed coroutines can await it.
 - `WebFileMount.cs` — `Ensure(path)` coroutine over that bridge; no-op off WebGL.
-- Hooks: `Config` pins `MainPath=/uma` / Default mode / no download; `UmaViewerMain.Start`
-  mounts the two DBs then the `livesettings`/`shader` bundles; `UmaAssetManager.PreLoadAsset`
-  mounts each bundle (and its deps) before acquiring. Unmounted synchronous loads (e.g. boot
-  icons) skip quietly rather than error.
+- Hooks: `Config` pins `MainPath=/uma` / Default mode / no download;
+  `UmaAssetManager.PreLoadAsset` mounts each bundle (and its deps) before acquiring;
+  `UmaViewerMain.Start` mounts the `livesettings`/`shader` boot bundles. Unmounted synchronous
+  loads (e.g. boot icons) skip quietly rather than error.
 
 Known gaps: boot character/live icons load synchronously and are not pre-mounted, so they show
 blank until wired through a coroutine; `master.mdb` is large and lives fully in MEMFS (heap
