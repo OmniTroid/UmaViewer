@@ -1236,7 +1236,17 @@ public class UmaViewerUI : MonoBehaviour
         if (WebFileMount.Active && entry != null)
         {
             var scene = UmaSceneController.instance;
-            var requests = UmaAssetManager.SearchAB(UmaViewerMain.Instance, entry);
+
+            // LoadAnimation pulls in sibling clips synchronously (intro _s, outro _e, facial, ear),
+            // which aren't dependencies of the clicked clip, so mount those bundles too or the
+            // build-up/wind-down loads null and the model just T-poses.
+            var roots = new List<UmaDatabaseEntry> { entry };
+            AddSiblingAnimations(roots, entry.Name);
+
+            var requests = new List<UmaDatabaseEntry>();
+            foreach (var root in roots)
+                requests.AddRange(UmaAssetManager.SearchAB(UmaViewerMain.Instance, root));
+
             for (int i = 0; i < requests.Count; i++)
             {
                 scene?.LoadingProgressChange(i, requests.Count, "Loading Animation");
@@ -1247,6 +1257,21 @@ public class UmaViewerUI : MonoBehaviour
         }
         (Builder.CurrentUMAContainer)?.LoadAnimation(entry);
         LoadedAnimation();
+    }
+
+    // Mirrors the sibling-clip lookups in UmaContainerCharacter.LoadAnimation(AnimationClip): the
+    // intro/outro and facial/ear clips a _loop motion loads alongside itself.
+    void AddSiblingAnimations(List<UmaDatabaseEntry> list, string name)
+    {
+        void Add(string key)
+        {
+            if (!string.IsNullOrEmpty(key) && Main.AbList.TryGetValue(key, out var e) && e != null && !list.Contains(e))
+                list.Add(e);
+        }
+        Add(name.Replace("_loop", "_s"));
+        Add(name.Replace("_loop", "_e"));
+        Add($"{name.Replace("/body", "/facial")}_face");
+        Add($"{name.Replace("/body", "/facial")}_ear");
     }
 
     string getCharaName(string id)
