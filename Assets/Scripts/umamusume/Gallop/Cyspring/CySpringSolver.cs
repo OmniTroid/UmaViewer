@@ -82,13 +82,14 @@ namespace Gallop
             Vector3 d = pos - center;
             float dist = Len(d);
             if (dist <= 1e-6f) return;
-            if (inner) { if (dist > R) pos = center + d * (R / dist); }
-            else       { if (dist < R) pos = center + d * (R / dist); }
+            if (inner) { if (dist > R) { pos = center + d * (R / dist); CollisionHits++; } }
+            else       { if (dist < R) { pos = center + d * (R / dist); CollisionHits++; } }
         }
 
         static void ResolveOne(ref NativeClothWorking bne, ref NativeClothCollision c,
                                NativeRootParentWork[] parents, ref Vector3 pos)
         {
+            CollisionCalls++;
             if (c.IsEnable == 0) return;
             // Character colliders only apply to bones that asked for them (0x180007397): if the
             // bone's CheckCharaCollision is clear, every IsCharaCollision collider is skipped.
@@ -160,13 +161,28 @@ namespace Gallop
         /// The clamp is lopsided and that is not a typo: 0x18000a558 NEGATES LimitRotationMin
         /// before comparing, so the low edge is -Min, not Min. The shape at 0x18000a55c is
         /// (-Min > a) ? -Min : min(Max, a).
+        // Branch-coverage counters. The single-step differential re-seeds from the plugin every
+        // frame, so it only ever exercises the solver near the correct trajectory: a branch that
+        // does not fire there is never compared, however wrong it is. These say which ones ran.
+        public static long ClampCalls, ClampBites, CollisionCalls, CollisionHits, SkirtKneeHits;
+        // How close clamp inputs sit to the wrap discontinuity at +-180. An euler triple is not
+        // unique near there (nor near ZXY gimbal lock), so two numerically equal rotations can
+        // produce very different triples -- and the clamp then maps them to very different
+        // results. A bone sitting in this band is one branch flip away from a large jump.
+        public static long ClampNear180, ClampNear90y;
+        public static void ResetCounters() { ClampCalls = ClampBites = CollisionCalls = CollisionHits = SkirtKneeHits = ClampNear180 = ClampNear90y = 0; }
+
         static float ClampLimitAngle(float a, float lo, float hi)
         {
+            ClampCalls++;
             a = a % 360f;
             if (a < 0f) a += 360f;
             if (a > 180f) a -= 360f;
+            if (a > 170f || a < -170f) ClampNear180++;
             float min = -lo;
-            return (min > a) ? min : Mathf.Min(hi, a);
+            float r = (min > a) ? min : Mathf.Min(hi, a);
+            if (r != a) ClampBites++;
+            return r;
         }
 
         /// Clamp the bone's deflection from its rest pose into the per-axis limit box.
@@ -181,6 +197,8 @@ namespace Gallop
         {
             Quaternion local = Qmul(QConj(q), final);
             Vector3 e = local.eulerAngles;
+            float ey = e.y > 180f ? e.y - 360f : e.y;
+            if (Mathf.Abs(Mathf.Abs(ey) - 90f) < 5f) ClampNear90y++;   // ZXY lock is at |y| = 90
             e.x = ClampLimitAngle(e.x, b.LimitRotationMin.x, b.LimitRotationMax.x);
             e.y = ClampLimitAngle(e.y, b.LimitRotationMin.y, b.LimitRotationMax.y);
             e.z = ClampLimitAngle(e.z, b.LimitRotationMin.z, b.LimitRotationMax.z);
@@ -357,6 +375,7 @@ namespace Gallop
                 if (b.CollisionRadius > dot)
                 {
                     pos = pos + n * (b.CollisionRadius - dot);
+                    SkirtKneeHits++;
                     ConstrainLength(ref b, anchor, ref pos);
                 }
             }

@@ -64,6 +64,13 @@ namespace Gallop
 
         static int frame;
 
+        // Integer state the plugin writes during the solve. These are not positions, so the
+        // float comparison above ignores them -- and that made the harness blind to a whole
+        // branch: IsCheckSkirtKnee is cleared on entry and only set again from inside the solve,
+        // so if the plugin raises it and the port never does, the port silently skips the
+        // skirt-knee push and the float fields can still agree on the step where it happened.
+        static long skirtNat, skirtMan, skirtBoth, skirtNeither, collMismatch;
+
         // AimVector candidate probe. The plugin's AimVector block (0x1800098xx-0x180009ae8) is
         // register-allocated across spill slots, so reading the exact operands off the listing is
         // slow and easy to get wrong -- and the divergence dump cannot settle it either, because
@@ -117,6 +124,7 @@ namespace Gallop
                 firstFrame[i] = -1; firstBone[i] = -1; worstWhere[i] = "";
             }
             divLimit = divCollision = divSkip = divTotal = bonesSeen = 0;
+            skirtNat = skirtMan = skirtBoth = skirtNeither = collMismatch = 0;
             detail.Length = 0; detailCount = 0;
             worstDetail.Length = 0; worstSeverity = 0; curSeverity = 0;
             for (int i = 0; i < NCAND; i++) { candMatch[i] = 0; candSamples[i] = 0; candMax[i] = 0; }
@@ -193,6 +201,10 @@ namespace Gallop
                     }
                     qcandSet[i] = false;
                 }
+
+                bool sn = a.IsCheckSkirtKnee != 0, sm2 = b.IsCheckSkirtKnee != 0;
+                if (sn && sm2) skirtBoth++; else if (sn) skirtNat++; else if (sm2) skirtMan++; else skirtNeither++;
+                if (a.ActiveCollision != b.ActiveCollision) collMismatch++;
 
                 anyDiverged |= TakeP(0, i, V(a.AimVector, b.AimVector), hasParent);
                 anyDiverged |= TakeP(1, i, V(a.Force, b.Force), hasParent);
@@ -354,6 +366,13 @@ namespace Gallop
             sb.AppendLine($"  of those Collision : {divCollision}");
             sb.AppendLine($"  of those IsSkip    : {divSkip}");
             if (divTotal == 0) sb.AppendLine("\nno divergence above eps -- the port reproduces the plugin step for step.");
+            sb.AppendLine();
+            sb.AppendLine("integer state written during the solve:");
+            sb.AppendLine($"  IsCheckSkirtKnee set by both      : {skirtBoth}");
+            sb.AppendLine($"  IsCheckSkirtKnee set by PLUGIN only: {skirtNat}");
+            sb.AppendLine($"  IsCheckSkirtKnee set by PORT only  : {skirtMan}");
+            sb.AppendLine($"  IsCheckSkirtKnee set by neither    : {skirtNeither}");
+            sb.AppendLine($"  ActiveCollision mismatches         : {collMismatch}");
             if (candSamples[0] > 0)
             {
                 sb.AppendLine();
