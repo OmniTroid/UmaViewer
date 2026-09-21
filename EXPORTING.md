@@ -104,7 +104,9 @@ Companions live in sibling folders: `_face` and `_ear` (facial), `_pos` (root mo
 (a scripted camera). A camera is independent of the part kind: some one-shots have one, some do
 not, loops never do. When a motion has a `_cam`, the export records it as a camera VMD of its own
 next to the motion file, `<motion>_camera.vmd` with the model name カメラ・照明, the way MMD camera
-motions are distributed (`--no-camera` skips it). A card cut-in (`anm_cti_crd..._01`) is one cut of a chain the
+motions are distributed (`--no-camera` skips it). A motion with a `_pos` companion moves the character's root; that root
+motion is written into センター in world space so the camera framing holds. Motions without one (every
+loop) stay in place. A card cut-in (`anm_cti_crd..._01`) is one cut of a chain the
 viewer plays through (each cut loads the next at 99% of its length); naming any cut records the
 chain from there to the last cut into one VMD, camera cuts included (`--no-chain` records that cut
 alone). Each cut is switched at its exact last frame and its first frame is held, physics running,
