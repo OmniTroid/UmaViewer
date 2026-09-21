@@ -184,11 +184,18 @@ public class CliExporter : MonoBehaviour
             Quit(0); yield break;
         }
 
+        // --solver-trace <file.csv>: dump every bone's full solve state, inputs included, on
+        // every call, for comparing two free-running SEQUENCES. Works with either solver, so the
+        // plugin's run and the port's run can be aligned call-for-call afterwards.
+        string tracePath = Opt("--solver-trace");
+
         string physRefPath = Opt("--physics-ref");
         if (!string.IsNullOrEmpty(physRefPath))
         {
+            if (!string.IsNullOrEmpty(tracePath)) { Gallop.CySpringTrace.Reset(); Gallop.CySpringTrace.Armed = true; }
             yield return RunSafe(RecordPhysicsRef(container, main, animId, physRefPath), e => buildErr = e);
             if (buildErr != null) { Fail("physics-ref threw: " + buildErr); yield break; }
+            if (!string.IsNullOrEmpty(tracePath)) { Gallop.CySpringTrace.Armed = false; Gallop.CySpringTrace.Write(tracePath); }
             Debug.Log($"CLI_BRANCH clampCalls={Gallop.CySpringSolver.ClampCalls} clampBites={Gallop.CySpringSolver.ClampBites} collCalls={Gallop.CySpringSolver.CollisionCalls} collHits={Gallop.CySpringSolver.CollisionHits} skirtKnee={Gallop.CySpringSolver.SkirtKneeHits} near180={Gallop.CySpringSolver.ClampNear180} near90y={Gallop.CySpringSolver.ClampNear90y}");
             Debug.Log("CLI_EXPORT_DONE " + physRefPath);
             Quit(0); yield break;

@@ -200,10 +200,12 @@ namespace Gallop
         {
             if (!isNative)
             {
+                var tracePre = CySpringTrace.Armed ? CySpringDiff.Snapshot(clothWorkingArray) : null;
                 CySpringSolver.NativeClothUpdate(clothWorkingArray, nClothWorking, collisionArray,
                     rootParentWorkArray, stiffnessForceRate, dragForceRate, gravityRate,
                     windX, windY, windZ, windStrength, bCollisionSwitch, timescale, is60FPS,
                     moveRate, addMoveRate, springRate);
+                CySpringTrace.Record(tracePre, clothWorkingArray, nClothWorking);
                 return;
             }
 
@@ -211,6 +213,7 @@ namespace Gallop
             // plugin below advance the real state, then compare. Same input, one step, so the
             // residual is attributable rather than accumulated. The simulation keeps the
             // plugin's result, which makes every later frame a fresh comparison too.
+            NativeClothWorking[] nativeTracePre = CySpringTrace.Armed ? CySpringDiff.Snapshot(clothWorkingArray) : null;
             NativeClothWorking[] managedOut = null, preState = null;
             if (CySpringDiff.Armed)
             {
@@ -267,6 +270,7 @@ namespace Gallop
             }
 
             // Compare after the pin is released, so clothWorkingArray holds the plugin's output.
+            CySpringTrace.Record(nativeTracePre, clothWorkingArray, nClothWorking);
             if (managedOut != null)
                 CySpringDiff.Compare(clothWorkingArray, managedOut, preState, nClothWorking);
         }
@@ -304,11 +308,34 @@ namespace Gallop
 
             if (!isNative)
             {
+                var tracePre = CySpringTrace.Armed ? CySpringDiff.Snapshot(clothWorkingArray) : null;
                 CySpringSolver.NativeClothSkirtUpdate(clothWorkingArray, nClothWorking, collisionArray,
                     skirtWorkingArray, skirtWorkingIndex, ref arg, rootParentWorkArray,
                     stiffnessForceRate, dragForceRate, gravityRate, windX, windY, windZ, windStrength,
                     bCollisionSwitch, timescale, is60FPS, moveRate, addMoveRate, springRate);
+                CySpringTrace.Record(tracePre, clothWorkingArray, nClothWorking);
                 return;
+            }
+
+            // Differential for the skirt-linked entry point. This is where the skirt groups
+            // actually go -- not NativeSkirtUpdate -- and it had no differential and no trace,
+            // so the cloth solver could measure as exact while the skirt drifted tens of degrees.
+            NativeClothWorking[] skClothPre = null, skClothMan = null, skTracePre = null;
+            NativeSkirtWorking skPre = default, skMan = default;
+            bool skArmed = CySpringDiff.Armed;
+            if (CySpringTrace.Armed) skTracePre = CySpringDiff.Snapshot(clothWorkingArray);
+            if (skArmed)
+            {
+                skClothPre = CySpringDiff.Snapshot(clothWorkingArray);
+                skClothMan = CySpringDiff.Snapshot(clothWorkingArray);
+                skPre = skirtWorkingArray[skirtWorkingIndex];
+                var skirtCopy = (NativeSkirtWorking[])skirtWorkingArray.Clone();
+                var argCopy = arg;
+                CySpringSolver.NativeClothSkirtUpdate(skClothMan, nClothWorking, collisionArray,
+                    skirtCopy, skirtWorkingIndex, ref argCopy, rootParentWorkArray,
+                    stiffnessForceRate, dragForceRate, gravityRate, windX, windY, windZ, windStrength,
+                    bCollisionSwitch, timescale, is60FPS, moveRate, addMoveRate, springRate);
+                skMan = skirtCopy[skirtWorkingIndex];
             }
 
             PinnedArray<NativeClothWorking> clothPin = null;
@@ -356,6 +383,12 @@ namespace Gallop
                     springRate);
 
                 arg = argPin.Value;
+                CySpringTrace.Record(skTracePre, clothWorkingArray, nClothWorking);
+                if (skArmed)
+                {
+                    CySpringDiff.Compare(clothWorkingArray, skClothMan, skClothPre, nClothWorking);
+                    CySpringDiff.CompareSkirt(skPre, skirtWorkingArray[skirtWorkingIndex], skMan, arg);
+                }
             }
             finally
             {
@@ -439,6 +472,20 @@ namespace Gallop
                 return;
             }
 
+            // Differential for the skirt entry point, same idea as the cloth one: run the port on
+            // a copy of the pre-step state, let the plugin advance the real one, compare. This
+            // path had no differential at all, which is why the cloth solver could measure as
+            // exact while the skirt drifted tens of degrees in a free run.
+            NativeSkirtWorking skPre = default, skMan = default;
+            bool skArmed = CySpringDiff.Armed;
+            if (skArmed)
+            {
+                skPre = workingArray[workingIndex];
+                skMan = workingArray[workingIndex];
+                var argCopy = arg;
+                CySpringSolver.NativeSkirtUpdate(ref skMan, ref argCopy);
+            }
+
             PinnedArray<NativeSkirtWorking> workingPin = null;
             PinnedValue<NativeSkirtArg> argPin = null;
 
@@ -458,6 +505,7 @@ namespace Gallop
                     argPtr);
 
                 arg = argPin.Value;
+                if (skArmed) CySpringDiff.CompareSkirt(skPre, workingArray[workingIndex], skMan, arg);
             }
             finally
             {

@@ -2,10 +2,17 @@ using UnityEngine;
 
 namespace Gallop
 {
-    // Managed C# port of native/CySpring/CySpringPlugin.cpp (the reversed CySpring solver),
-    // operating in place on the same Native* structs. Lets CySpring run with no native plugin
-    // (WebGL/IL2CPP, or any platform via CySpringNative.UseNativePlugin = false). Mirrors the
-    // .cpp math, unit constants, and stages; see that file for the fidelity notes.
+    // Managed C# port of CySpringPlugin.dll, operating in place on the same Native* structs.
+    // Lets CySpring run with no native plugin (WebGL/IL2CPP, or any platform via
+    // CySpringNative.UseNativePlugin = false).
+    //
+    // The reference is the plugin's x64 code, not the old native/CySpring/CySpringPlugin.cpp
+    // reconstruction, which was removed: it had the force divisors transposed, no chain
+    // propagation, no rotation limit, the wrong integrate scaling, a dead spring-apply blend, a
+    // collision loop over the wrong slots, and an invented skirt collider. Every stage here cites
+    // the plugin address it was read from, and is validated against the plugin two ways -- a
+    // single-step differential (CySpringDiff, --solver-diff) and a free-running trace
+    // (CySpringTrace, --solver-trace).
     public static class CySpringSolver
     {
         // 30fps baseline divisor applied to every force term; see SolveCloth.
@@ -437,6 +444,20 @@ namespace Gallop
             // [r10+rbx+0x138] with r10 = i * 0x168.
             for (int i = 0; i < nCond; i++) cond[i].IsCheckSkirtKnee = 0;
 
+            SolveChain(cond, nCond, collisions, parents, stiffnessForceRate, dragForceRate, gravityRate,
+                windX, windY, windZ, windStrength, bCollisionSwitch, timescale, is60FPS);
+        }
+
+        /// The chain solve shared by NativeClothUpdate and NativeClothSkirtUpdate. Split out
+        /// because the skirt variant must STAMP IsCheckSkirtKnee onto the bones between clearing
+        /// it and solving (0x1800087b0 clears, 0x180008a3c stamps, 0x180008c84 solves), so it
+        /// cannot simply call NativeClothUpdate -- that entry's own clear would wipe the stamp.
+        static void SolveChain(NativeClothWorking[] cond, int nCond,
+            NativeClothCollision[] collisions, NativeRootParentWork[] parents,
+            float stiffnessForceRate, float dragForceRate, float gravityRate,
+            float windX, float windY, float windZ, float windStrength,
+            bool bCollisionSwitch, float timescale, bool is60FPS)
+        {
             for (int i = 0; i < nCond; i++)
             {
                 // Chain the bone onto the one before it. The .cpp solved every bone from the
@@ -471,29 +492,111 @@ namespace Gallop
             }
         }
 
-        static void ProcessSkirtCollider(ref NativeSkirtWorking w, Vector3 jointRelRoot, Vector3 centerRelRoot,
-            float radius, float influenceAngle, float influenceMaxAngle)
+        /// Axis-angle quaternion from an angle in DEGREES, as the plugin builds it: half-angle
+        /// = deg * pi/180 * 0.5 (0x180008810 and 0x18000bb19, the doubles at 0x18008ec00 and
+        /// 0x18008ec10), then (axis * sin, cos) via the CRT sin/cos at 0x180002716/0x180001938.
+        static Quaternion QAxisDeg(Vector3 axis, float deg)
         {
-            Vector3 toChild = w.SkirtInitChildPos - jointRelRoot;
-            float d = Len(toChild);
-            if (d < radius)
-            {
-                float t = influenceMaxAngle > influenceAngle ? (radius - d) / (radius + 1e-6f) : 0f;
-                w.Evaluation = t;
-                w.OffsetAngle = t * (influenceMaxAngle - influenceAngle) + influenceAngle;
-                w.RotationAxis = Norm(Vector3.Cross(toChild, centerRelRoot));
-            }
+            double h = deg * 0.0174532924 * 0.5;
+            float sn = (float)System.Math.Sin(h), cs = (float)System.Math.Cos(h);
+            return new Quaternion(axis.x * sn, axis.y * sn, axis.z * sn, cs);
         }
 
+        const float FLT_EPS = 1.1920929e-07f;   // 0x18008ebe4, the plugin's degeneracy gate
+
+        /// The standalone NativeSkirtUpdate export (0x18000b190). Four guarded calls to one
+        /// collider routine, each joint made relative to RootPos, all accumulating into
+        /// Evaluation by max. Note it does NOT seed Evaluation itself -- the cloth-skirt wrapper
+        /// does that -- so the export leaves whatever the caller had there as the floor.
         public static void NativeSkirtUpdate(ref NativeSkirtWorking w, ref NativeSkirtArg a)
         {
             Vector3 root = a.RootPos;
             Vector3 center = a.CenterPos - root;
-            if (w.IsCheckLeftKnee != 0)   ProcessSkirtCollider(ref w, a.KneeLPos - root, center, a.KneeColliderRadius, a.InfluenceAngle, a.InfluenceMaxAngle);
-            if (w.IsCheckLeftAnkle != 0)  ProcessSkirtCollider(ref w, a.AnkleLPos - root, center, a.AnkleColliderRadius, a.InfluenceAngle, a.InfluenceMaxAngle);
-            if (w.IsCheckRightKnee != 0)  ProcessSkirtCollider(ref w, a.KneeRPos - root, center, a.KneeColliderRadius, a.InfluenceAngle, a.InfluenceMaxAngle);
-            if (w.IsCheckRightAnkle != 0) ProcessSkirtCollider(ref w, a.AnkleRPos - root, center, a.AnkleColliderRadius, a.InfluenceAngle, a.InfluenceMaxAngle);
+            if (w.IsCheckLeftKnee != 0)   ProcessSkirtCollider(ref w, a.KneeLPos - root,  center, root, a.KneeColliderRadius,  a.InfluenceAngle, a.InfluenceMaxAngle);
+            if (w.IsCheckRightKnee != 0)  ProcessSkirtCollider(ref w, a.KneeRPos - root,  center, root, a.KneeColliderRadius,  a.InfluenceAngle, a.InfluenceMaxAngle);
+            if (w.IsCheckLeftAnkle != 0)  ProcessSkirtCollider(ref w, a.AnkleLPos - root, center, root, a.AnkleColliderRadius, a.InfluenceAngle, a.InfluenceMaxAngle);
+            if (w.IsCheckRightAnkle != 0) ProcessSkirtCollider(ref w, a.AnkleRPos - root, center, root, a.AnkleColliderRadius, a.InfluenceAngle, a.InfluenceMaxAngle);
         }
+
+        /// One skirt collider (the routine at 0x18000b670). Not a proximity test: it is the
+        /// swing angle, about RotationAxis through the skirt root, that takes the bone from
+        /// its rest direction to just tangent to the joint sphere -- then weighted down by how
+        /// far around the body the swung bone ends up from the joint.
+        ///
+        /// The .cpp had `if (dist < radius) Evaluation = (radius - dist)/radius`, which never
+        /// fired (the knee sits ~0.35 from the child, radius is 0.1), so Evaluation was never
+        /// written at all and the whole skirt coupling downstream stayed dead.
+        static void ProcessSkirtCollider(ref NativeSkirtWorking w, Vector3 J, Vector3 center, Vector3 root,
+            float r, float influenceAngle, float influenceMaxAngle)
+        {
+            // Everything relative to RootPos (0x18000b6ec-0x18000b73a subtract it from the
+            // working positions; the caller already did so for the joint and center).
+            Vector3 P = w.SkirtRootPos - root;
+            Vector3 C = w.SkirtInitChildPos - root;
+            Vector3 N = w.SkirtInitNormal;
+            Vector3 A = w.RotationAxis;
+
+            Vector3 D = J - P;                                   // skirt root -> joint
+            float s = Vector3.Dot(J - C, N) + r;                 // 0x18000b751-0x18000b793
+            float dLen = Len(D);
+            float t = SafeSqrt(dLen * dLen - r * r);             // tangent length, 0x18000b7c8
+            Vector3 T = Vector3.Cross(A, D);                     // 0x18000b821-0x18000b84d
+            float tLen = Len(T);
+            Vector3 E = C - P;                                   // rest child offset
+            float eLen = Len(E);
+            Vector3 Eh = E / eLen;                               // plugin divides unguarded
+            float ehLen = Len(Eh);
+
+            float theta = 0f;
+            if (ehLen >= FLT_EPS)                                // 0x18000b9e3
+            {
+                // Tangent point from P to the sphere, in the plane normal to A:
+                //   K - P = Dhat*(t^2/|D|) + That*(r*t/|D|)     (coefficients at 0x18000b7f5-0x18000b807)
+                Vector3 KP = D * (t * t / (dLen * dLen)) + T * (r * t / (dLen * tLen));
+                float proj = Vector3.Dot(KP, Eh);                // 0x18000b97c-0x18000b9a7
+                Vector3 QP = Eh * proj + N * s;                  // 0x18000ba00-0x18000ba51
+                float qLen = Len(QP);
+                if (qLen >= FLT_EPS)                             // 0x18000baae
+                {
+                    double c = Vector3.Dot(QP, Eh) / ehLen / qLen;
+                    if (c > 1.0) c = 1.0; else if (c < -1.0) c = -1.0;
+                    theta = (float)(System.Math.Acos(c) * 360.0 / 6.283185307179586);   // 0x18000bae0
+                }
+            }
+
+            // Joint on the far side of the normal plane: negate and take the max DIRECTLY.
+            // 0x18000baf9 tests s against 0, and the s<0 path is mulss -1.0 then jmp 0x18000be92 --
+            // straight to the write, bypassing the swung-child test and the influence falloff
+            // below entirely. Easy to miss, and it applies the weighting to bones it should not.
+            if (s < 0f)
+            {
+                theta = -theta;
+                if (theta > w.Evaluation) w.Evaluation = theta;
+                return;
+            }
+
+            // Swing the rest child by theta and measure, at the body centre, how far it lands
+            // from the joint (0x18000bb0d-0x18000be33, second acos scaled by 57.29578).
+            Quaternion q = QAxisDeg(A, theta);
+            Vector3 Cp = P + Qrot(q, E);
+            Vector3 a1 = Cp - center, a2 = J - center;
+            double cphi = Vector3.Dot(a1, a2) / (Len(a1) * Len(a2));
+            if (cphi > 1.0) cphi = 1.0; else if (cphi < -1.0) cphi = -1.0;
+            float phi = (float)(System.Math.Acos(cphi) * 57.29578);
+
+            if (phi > influenceMaxAngle)                         // 0x18000be4b
+            {
+                if (w.Evaluation < 0f) w.Evaluation = 0f;        // 0x18000be50-0x18000be57
+                return;
+            }
+            float wgt = 1f;                                      // 0x18000be85
+            if (phi > influenceAngle)                            // 0x18000be66: linear falloff to 0 at max
+                wgt = 1f - (phi - influenceAngle) / (influenceMaxAngle - influenceAngle);
+            theta *= wgt;                                        // 0x18000be8d
+            if (theta > w.Evaluation) w.Evaluation = theta;      // 0x18000be92: max
+        }
+
+        static float SafeSqrt(float x) => x > 0f ? Mathf.Sqrt(x) : 0f;
 
         public static void NativeClothSkirtUpdate(NativeClothWorking[] cond, int nCond,
             NativeClothCollision[] collisions, NativeSkirtWorking[] skirt, int skirtIndex, ref NativeSkirtArg arg,
@@ -503,10 +606,41 @@ namespace Gallop
             bool bCollisionSwitch, float timescale, bool is60FPS,
             float moveRate, float addMoveRate, float springRateArg)
         {
+            if (cond == null) return;
+            if (nCond > cond.Length) nCond = cond.Length;
+            springRate = springRateArg;
+            CySpringSolver.moveRate = moveRate;
+            CySpringSolver.addMoveRate = addMoveRate;
+            for (int i = 0; i < nCond; i++) cond[i].IsCheckSkirtKnee = 0;   // 0x1800087b0
+
+            // This is what the skirt entry point adds over the plain one, and what the old port
+            // missed entirely by running the two solves independently: the skirt evaluation is
+            // COUPLED into the cloth bones. The plugin seeds Evaluation with -360 (0x1800087de),
+            // lets the four knee/ankle colliders raise it (each keeps the max), and if anything
+            // fired (0x1800087f5, against the same -360) it rotates SkirtInitNormal about
+            // RotationAxis by Evaluation - OffsetAngle (0x18000880b-0x180008867), then stamps
+            // that normal, SkirtRootPos and IsCheckSkirtKnee=1 onto every bone in the group
+            // (0x1800089c4-0x180008a81). The cloth solve's knee push then has something to do.
             if (skirt != null && (uint)skirtIndex < (uint)skirt.Length)
-                NativeSkirtUpdate(ref skirt[skirtIndex], ref arg);
-            NativeClothUpdate(cond, nCond, collisions, parents, stiffnessForceRate, dragForceRate, gravityRate,
-                windX, windY, windZ, windStrength, bCollisionSwitch, timescale, is60FPS, moveRate, addMoveRate, springRateArg);
+            {
+                ref NativeSkirtWorking w = ref skirt[skirtIndex];
+                w.Evaluation = -360f;
+                NativeSkirtUpdate(ref w, ref arg);
+                if (w.Evaluation > -360f)
+                {
+                    Quaternion q = QAxisDeg(w.RotationAxis, w.Evaluation - w.OffsetAngle);
+                    Vector3 n = Qrot(q, w.SkirtInitNormal);
+                    for (int i = 0; i < nCond; i++)
+                    {
+                        cond[i].SkirtKneeNormal = n;
+                        cond[i].SkirtNormalPos = w.SkirtRootPos;
+                        cond[i].IsCheckSkirtKnee = 1;
+                    }
+                }
+            }
+
+            SolveChain(cond, nCond, collisions, parents, stiffnessForceRate, dragForceRate, gravityRate,
+                windX, windY, windZ, windStrength, bCollisionSwitch, timescale, is60FPS);
         }
     }
 }

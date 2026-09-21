@@ -64,6 +64,61 @@ namespace Gallop
 
         static int frame;
 
+        // The SKIRT differential. The plugin exposes three entry points -- NativeClothUpdate,
+        // NativeClothSkirtUpdate and NativeSkirtUpdate -- and everything above compares only the
+        // first. The skirt runs through its own solver, reached from SkirtController via
+        // UpdateSkirtNativePluginOne, and was never compared at all. That is exactly the gap a
+        // free-running capture exposed: every non-skirt bone came out bit-identical while the
+        // skirt drifted tens of degrees.
+        static long skSamples, skOverEval, skOverAngle, skBranchMismatch;
+        static double skMaxEval, skSumEval, skMaxAngle, skSumAngle;
+        static string skWorst = "";
+        static readonly StringBuilder skDetail = new StringBuilder();
+        static int skDetailCount;
+
+        public static void CompareSkirt(NativeSkirtWorking pre, NativeSkirtWorking nat,
+                                        NativeSkirtWorking man, NativeSkirtArg arg)
+        {
+            skSamples++;
+            double de = System.Math.Abs((double)nat.Evaluation - man.Evaluation);
+            double da = System.Math.Abs((double)nat.OffsetAngle - man.OffsetAngle);
+            skSumEval += de; skSumAngle += da;
+            if (de > EPS) skOverEval++;
+            if (da > EPS) skOverAngle++;
+            // Did the two even take the same collider branches?
+            if (nat.IsCheckLeftKnee != man.IsCheckLeftKnee || nat.IsCheckRightKnee != man.IsCheckRightKnee
+                || nat.IsCheckLeftAnkle != man.IsCheckLeftAnkle || nat.IsCheckRightAnkle != man.IsCheckRightAnkle)
+                skBranchMismatch++;
+
+            double sev = System.Math.Max(de, da);
+            if (sev > System.Math.Max(skMaxEval, skMaxAngle) || skDetailCount == 0)
+            {
+                if (sev > skMaxEval + skMaxAngle || skDetailCount == 0)
+                {
+                    skWorst = "sample " + skSamples;
+                    if (skDetailCount < 3)
+                    {
+                        skDetailCount++;
+                        skDetail.AppendLine($"--- skirt divergence {skDetailCount} (sample {skSamples}) ---");
+                        skDetail.AppendLine($"  in  checks LK{pre.IsCheckLeftKnee} RK{pre.IsCheckRightKnee} LA{pre.IsCheckLeftAnkle} RA{pre.IsCheckRightAnkle}");
+                        skDetail.AppendLine($"  in  SkirtRootPos      {VS(pre.SkirtRootPos)}");
+                        skDetail.AppendLine($"  in  SkirtInitChildPos {VS(pre.SkirtInitChildPos)}");
+                        skDetail.AppendLine($"  in  SkirtInitNormal   {VS(pre.SkirtInitNormal)}");
+                        skDetail.AppendLine($"  in  RotationAxis      {VS(pre.RotationAxis)}");
+                        skDetail.AppendLine($"  in  Evaluation {pre.Evaluation:G9}  OffsetAngle {pre.OffsetAngle:G9}");
+                        skDetail.AppendLine($"  arg KneeL {VS(arg.KneeLPos)} KneeR {VS(arg.KneeRPos)}");
+                        skDetail.AppendLine($"  arg AnkleL {VS(arg.AnkleLPos)} AnkleR {VS(arg.AnkleRPos)}");
+                        skDetail.AppendLine($"  arg Center {VS(arg.CenterPos)} Root {VS(arg.RootPos)}");
+                        skDetail.AppendLine($"  arg kneeR {arg.KneeColliderRadius:G9} ankleR {arg.AnkleColliderRadius:G9} infl {arg.InfluenceAngle:G9} inflMax {arg.InfluenceMaxAngle:G9}");
+                        skDetail.AppendLine($"  nat Evaluation {nat.Evaluation:G9}   man Evaluation {man.Evaluation:G9}");
+                        skDetail.AppendLine($"  nat OffsetAngle {nat.OffsetAngle:G9}  man OffsetAngle {man.OffsetAngle:G9}");
+                    }
+                }
+            }
+            if (de > skMaxEval) skMaxEval = de;
+            if (da > skMaxAngle) skMaxAngle = da;
+        }
+
         // Integer state the plugin writes during the solve. These are not positions, so the
         // float comparison above ignores them -- and that made the harness blind to a whole
         // branch: IsCheckSkirtKnee is cleared on entry and only set again from inside the solve,
@@ -124,6 +179,8 @@ namespace Gallop
                 firstFrame[i] = -1; firstBone[i] = -1; worstWhere[i] = "";
             }
             divLimit = divCollision = divSkip = divTotal = bonesSeen = 0;
+            skSamples = skOverEval = skOverAngle = skBranchMismatch = 0;
+            skMaxEval = skSumEval = skMaxAngle = skSumAngle = 0; skWorst = ""; skDetail.Length = 0; skDetailCount = 0;
             skirtNat = skirtMan = skirtBoth = skirtNeither = collMismatch = 0;
             detail.Length = 0; detailCount = 0;
             worstDetail.Length = 0; worstSeverity = 0; curSeverity = 0;
@@ -366,6 +423,18 @@ namespace Gallop
             sb.AppendLine($"  of those Collision : {divCollision}");
             sb.AppendLine($"  of those IsSkip    : {divSkip}");
             if (divTotal == 0) sb.AppendLine("\nno divergence above eps -- the port reproduces the plugin step for step.");
+            sb.AppendLine();
+            sb.AppendLine("SKIRT solver (NativeSkirtUpdate -- a separate plugin entry point):");
+            sb.AppendLine($"  samples                    : {skSamples}");
+            if (skSamples > 0)
+            {
+                sb.AppendLine(string.Format(ci, "  Evaluation  max {0:G6}  mean {1:G6}  over eps {2}", skMaxEval, skSumEval / skSamples, skOverEval));
+                sb.AppendLine(string.Format(ci, "  OffsetAngle max {0:G6}  mean {1:G6}  over eps {2}", skMaxAngle, skSumAngle / skSamples, skOverAngle));
+                sb.AppendLine($"  collider-branch mismatches : {skBranchMismatch}");
+                sb.AppendLine($"  worst                      : {skWorst}");
+            }
+            if (skDetail.Length > 0) { sb.AppendLine(); sb.Append(skDetail); }
+
             sb.AppendLine();
             sb.AppendLine("integer state written during the solve:");
             sb.AppendLine($"  IsCheckSkirtKnee set by both      : {skirtBoth}");
