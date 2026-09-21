@@ -31,16 +31,10 @@ public class ModelExporter
         container.SetDynamicBoneEnable(false);
         container.EnablePhysics = false;
         container.UmaFaceAnimator?.Rebind();
-        // Body rest pose, identical to the one the VMD recorder measures its rotations from
-        // (UnityHumanoidVMDRecorder.Initialize): Rebind clears every animated bone to the default
-        // pose, then ResetBodyPose/UpBodyReset put the body bones at their runtime positions.
-        // Both steps matter -- InitBoneTransform covers only the body-skinned bones, so without
-        // the Rebind any other bone keeps whatever pose was last animated.
+        // Rest pose shared with the VMD recorder (see MMDRestPose): a recorded VMD is a delta
+        // from exactly the pose the PMX is bound in.
         var bodyAnimator = container.UmaAnimator;
-        bool animatorWasEnabled = bodyAnimator != null && bodyAnimator.enabled;
-        if (bodyAnimator != null) { bodyAnimator.Rebind(); bodyAnimator.enabled = false; }
-        container.ResetBodyPose();
-        container.UpBodyReset();
+        bool animatorWasEnabled = MMDRestPose.Apply(container);
         container.EnableEyeTracking = false;
         container.FaceDrivenKeyTarget?.FacialResetAll();
         
