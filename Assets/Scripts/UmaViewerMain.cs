@@ -32,7 +32,6 @@ public class UmaViewerMain : MonoBehaviour
 
     private void Awake()
     {
-        Debug.LogError("[UmaBeacon] UmaViewerMain.Awake reached -- C# logging works");
         Instance = this;
         // Only build a Config if nothing has already supplied one. The constructor resets
         // MainPath to the default game folder, so constructing unconditionally discarded

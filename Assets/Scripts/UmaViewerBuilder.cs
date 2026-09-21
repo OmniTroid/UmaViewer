@@ -71,7 +71,6 @@ public string[] NormalBodyKeywords  = new[] { "skin", "body", "bdy", "face", "he
 
     public IEnumerator LoadUma(CharaEntry chara, string costumeId, bool mini, string haedCostumeId = "")
     {
-        Debug.LogError($"[UmaBeacon] LoadUma entered id={chara.Id} costume={costumeId} mini={mini} mob={chara.IsMob}");
         int id = chara.Id;
         var umaContainer = new GameObject($"Chara_{id}_{costumeId}").AddComponent<UmaContainerCharacter>();
         CurrentUMAContainer = umaContainer;

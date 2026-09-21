@@ -185,9 +185,7 @@ public class UmaContainerCharacter : UmaContainer
 
     public void MergeModel()
     {
-        Debug.Log($"[MergeModel] enter Body={(Body ? "ok" : "NULL")} Head={(Head ? "ok" : "null")} Tail={(Tail ? "ok" : "null")}");
         if (!Body) return;
-        Debug.Log("[MergeModel] start");
         var bodySkinnedMeshRenderer = Body.GetComponentInChildren<SkinnedMeshRenderer>();
         var bodyBones = bodySkinnedMeshRenderer.bones.ToDictionary(bone => bone.name, bone => bone.transform);
         List<Transform> emptyBones = new List<Transform>();
@@ -244,7 +242,6 @@ public class UmaContainerCharacter : UmaContainer
 
 
         emptyBones.ForEach(a => { if (a) Destroy(a.gameObject); });
-        Debug.Log("[MergeModel] mesh/bone merge done");
 
         //MergeAvatar
         UmaAnimator = gameObject.AddComponent<Animator>();
@@ -275,7 +272,6 @@ public class UmaContainerCharacter : UmaContainer
                 }
             }
         }
-        Debug.Log($"[MergeModel] shader swap over {Renderers.Count} renderers");
         foreach (var rend in Renderers)
         {
             for (int i = 0; i < rend.sharedMaterials.Length; i++)
