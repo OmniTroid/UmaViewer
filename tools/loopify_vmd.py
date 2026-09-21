@@ -85,6 +85,7 @@ def main():
     ap.add_argument('--pmin', type=int, default=8); ap.add_argument('--pmax', type=int, default=90)
     ap.add_argument('--crossfade', type=int, default=6, help='tail crossfade frames')
     ap.add_argument('--seam-cloth', action='store_true', help='include non-core (baked cloth) tracks when choosing the loop phase')
+    ap.add_argument('--start', type=int, default=-1, help="fixed loop window start frame instead of searching for the best seam (0 = the capture start, which the exporter aligns to the clip's phase 0)")
     a = ap.parse_args()
 
     hdr, name, bones, morphs, tail = parse(a.input)
@@ -120,6 +121,7 @@ def main():
             m = m + 0.5 * c
         if best is None or m < best[0]: best = (m, F0)
     _, F0 = best
+    if a.start >= 0: F0 = a.start
     K = min(a.crossfade, P//2)
 
     def blendb(a1, a2, t):
