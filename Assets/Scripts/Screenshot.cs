@@ -28,14 +28,25 @@ public class Screenshot : MonoBehaviour
         height = height == -1 ? Screen.height : height;
         var image = GrabFrame(camera, width, height, ScreenshotSettings.Transparent);
 
+        string baseName = string.Format("UmaViewer_{0}", DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss-fff"));
+        byte[] pngShot = ImageConversion.EncodeToPNG(image);
+
+        if (WebDownload.Active)
+        {
+            // WebGL has no user-accessible filesystem; hand the PNG to the browser to save.
+            WebDownload.Save($"{baseName}.png", pngShot);
+            UmaViewerUI.Instance.ShowMessage($"Screenshot downloaded: {baseName}.png", UIMessageType.Success);
+            Destroy(image);
+            return;
+        }
+
 #if UNITY_ANDROID && !UNITY_EDITOR
         string fileDirectory = Application.persistentDataPath + "/../Screenshots/";
 #else
         string fileDirectory = Application.dataPath + "/../Screenshots/";
 #endif
 
-        string fileName = fileDirectory + string.Format("UmaViewer_{0}", DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss-fff"));
-        byte[] pngShot = ImageConversion.EncodeToPNG(image);
+        string fileName = fileDirectory + baseName;
         Directory.CreateDirectory(fileDirectory);
         //fixes "/../" in path
         var fullpath = Path.GetFullPath($"{fileName}.png");
