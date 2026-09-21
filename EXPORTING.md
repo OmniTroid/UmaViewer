@@ -108,7 +108,8 @@ clip plays, so such a motion is recorded at the base height.
 
 Any part can be exported by naming it in `--anim`. Non-loop clips are recorded from their frame 0
 to their end (the viewer only plays `_s`/`_e` inside a loop's chain; the exporter plays them
-directly). Loops are warmed up, aligned and trimmed to one period as described above.
+directly). Their first frame is held for two seconds with physics running before capture, so the
+cloth starts settled in that pose instead of whipped by the cut from the rest pose. Loops are warmed up, aligned and trimmed to one period as described above.
 
 ## Exporting from the GUI
 

@@ -44,6 +44,9 @@ public static class MotionExporter
         public bool IncludeCamera = true;
     }
 
+    /// How long a non-loop clip's first frame is held, physics running, before capture.
+    const float HoldSeconds = 2f;
+
     public static bool IsLoop(string assetName) => assetName.Contains("_loop");
     public static bool IsTransitionClip(string assetName) => assetName.EndsWith("_s") || assetName.EndsWith("_e");
 
@@ -167,9 +170,41 @@ public static class MotionExporter
         if (springCtrl != null) springCtrl.Is60FpsMode = (recFps == 60);
         Unity.Jobs.LowLevel.Unsafe.JobsUtility.JobWorkerCount = 0;
 
+        var faceAnimator = container.UmaFaceAnimator;
+        float prevFaceSpeed = faceAnimator != null ? faceAnimator.speed : 1f;
+        float prevCamSpeed = camAnimator != null ? camAnimator.speed : 1f;
+        // (Re)start the clip and everything that runs alongside it at their frame 0.
+        void StartClips()
+        {
+            if (isTransition) container.OverrideController["clip_2"] = clip;
+            animator.Play("motion_2", 0, 0);
+            animator.Play(0, 2, 0);                       // position layer (_pos)
+            if (faceAnimator != null && faceAnimator.runtimeAnimatorController != null) { faceAnimator.Play(0, 0, 0); faceAnimator.Play(0, 1, 0); }
+            if (camAnimator != null && camAnimator.runtimeAnimatorController != null) camAnimator.Play("motion_1", 0, 0);
+        }
+        void SetSpeeds(float v)
+        {
+            animator.speed = v;
+            if (faceAnimator != null) faceAnimator.speed = v;
+            if (camAnimator != null) camAnimator.speed = v;
+        }
+
         UnityHumanoidVMDRecorder rec = null;
         try
         {
+            if (playDirect)
+            {
+                // Pre-roll: hold the clip's first frame, physics running, before capture. Without
+                // it the recording opens on the cut from the rest pose into that pose: the spring
+                // chains are whipped (a skirt moving 60 deg/frame at the start of an _e clip) and
+                // the head look-at rig, which lags the pose by a frame, leaves a foreign head
+                // rotation on frame 0.
+                StartClips();
+                SetSpeeds(0f);
+                Debug.Log($"CLI_EXPORT: holding frame 0 for {HoldSeconds:0.00}s before capture");
+                float hold = 0f;
+                while (hold < HoldSeconds) { hold += Time.deltaTime; yield return null; }
+            }
             if (isLoop)
             {
                 // Settle: let the crossfade finish and the spring chains fall into the orbit that
@@ -241,12 +276,8 @@ public static class MotionExporter
                 // iteration 2, has its frame 0 captured as that first kept frame.
                 if (playDirect && i == 2)
                 {
-                    if (isTransition) container.OverrideController["clip_2"] = clip;
-                    animator.Play("motion_2", 0, 0);
-                    animator.Play(0, 2, 0);                       // position layer (_pos)
-                    var face = container.UmaFaceAnimator;
-                    if (face != null && face.runtimeAnimatorController != null) { face.Play(0, 0, 0); face.Play(0, 1, 0); }
-                    if (camAnimator != null && camAnimator.runtimeAnimatorController != null) camAnimator.Play("motion_1", 0, 0);
+                    SetSpeeds(1f);
+                    StartClips();
                 }
                 // The camera pose visible now is what the recorder's FixedUpdate captured this
                 // frame as recorded frame i-1.
@@ -264,6 +295,8 @@ public static class MotionExporter
             if (springCtrl != null) springCtrl.Is60FpsMode = prevSpringMode;
             Unity.Jobs.LowLevel.Unsafe.JobsUtility.JobWorkerCount = prevWorkers;
             if (animator != null) animator.speed = prevSpeed;
+            if (faceAnimator != null) faceAnimator.speed = prevFaceSpeed;
+            if (camAnimator != null) camAnimator.speed = prevCamSpeed;
             container.SetHeadTracking(prevHeadTracking);
             container.EnableEyeTracking = prevEyeTracking;
             if (opt.BakePhysics && !prevPhysics) container.SetDynamicBoneEnable(false);
