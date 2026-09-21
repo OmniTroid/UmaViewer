@@ -15,6 +15,7 @@ using UnityEngine.UI;
 ///  * Export Loop    -- the loaded _loop clip, one period, starting at the clip's frame 0
 ///                      (a non-loop clip: start to end, with its camera as <name>_camera.vmd).
 ///  * Export Postanim -- the clip's _e wind-down, from the pose back to the neutral stance.
+///  * Export Camera  -- the camera as it is now, as a one-key camera VMD.
 ///
 /// The section is built at start-up from the scene's own sidebar pieces (a header button, a
 /// button row and a label cloned from the Other section), so the scene needs no edit.
@@ -27,7 +28,7 @@ public class UISettingsExport : MonoBehaviour
     const float RowHeight = 50f;    // the Other section's row height
     const float InfoHeight = 80f;   // three short lines
 
-    Button modelButton, idleButton, preanimButton, postanimButton;
+    Button modelButton, idleButton, preanimButton, postanimButton, cameraButton;
     enum Part { Loop, Preanim, Postanim }
     TMP_Text infoText;
     bool busy;
@@ -72,9 +73,10 @@ public class UISettingsExport : MonoBehaviour
         panel.preanimButton = panel.AddButtonRow(rowTemplate, "Export Preanim", () => panel.StartCoroutine(panel.ExportCurrentMotion(Part.Preanim)));
         panel.idleButton = panel.AddButtonRow(rowTemplate, "Export Loop", () => panel.StartCoroutine(panel.ExportCurrentMotion(Part.Loop)));
         panel.postanimButton = panel.AddButtonRow(rowTemplate, "Export Postanim", () => panel.StartCoroutine(panel.ExportCurrentMotion(Part.Postanim)));
+        panel.cameraButton = panel.AddButtonRow(rowTemplate, "Export Camera", panel.ExportCamera);
 
         var rt = section.GetComponent<RectTransform>();
-        rt.sizeDelta = new Vector2(rt.sizeDelta.x, InfoHeight + 4f * RowHeight);
+        rt.sizeDelta = new Vector2(rt.sizeDelta.x, InfoHeight + 5f * RowHeight);
         return panel;
     }
 
@@ -135,7 +137,7 @@ public class UISettingsExport : MonoBehaviour
     void SetBusy(bool on, Button which = null, string label = null)
     {
         busy = on;
-        foreach (var b in new[] { modelButton, idleButton, preanimButton, postanimButton }) if (b) b.interactable = !on;
+        foreach (var b in new[] { modelButton, idleButton, preanimButton, postanimButton, cameraButton }) if (b) b.interactable = !on;
         if (which && label != null) SetLabel(which.gameObject, label);
     }
 
@@ -208,6 +210,35 @@ public class UISettingsExport : MonoBehaviour
         {
             Debug.LogException(ex);
             UI.ShowMessage("Model export failed: " + ex.Message, UIMessageType.Error);
+        }
+#else
+        UI.ShowMessage("Not supported on this platform", UIMessageType.Warning);
+#endif
+    }
+
+    /// The camera that is rendering now: the animation camera while a camera clip plays, else
+    /// the main camera (the same choice Screenshot makes).
+    public void ExportCamera()
+    {
+        if (busy) return;
+#if UNITY_STANDALONE || UNITY_EDITOR
+        var cam = Builder.AnimationCamera != null && Builder.AnimationCamera.isActiveAndEnabled ? Builder.AnimationCamera : Camera.main;
+        if (cam == null)
+        {
+            UI.ShowMessage("No camera to export", UIMessageType.Warning);
+            return;
+        }
+        var path = StandaloneFileBrowser.SaveFilePanel("Save camera VMD", Config.Instance.MainPath, "camera", "vmd");
+        if (string.IsNullOrEmpty(path)) return;
+        try
+        {
+            MotionExporter.ExportCameraSnapshot(cam, Builder.CurrentUMAContainer, path);
+            UI.ShowMessage($"Saved {path}", UIMessageType.Success);
+        }
+        catch (Exception ex)
+        {
+            Debug.LogException(ex);
+            UI.ShowMessage("Camera export failed: " + ex.Message, UIMessageType.Error);
         }
 #else
         UI.ShowMessage("Not supported on this platform", UIMessageType.Warning);

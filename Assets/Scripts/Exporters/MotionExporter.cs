@@ -454,6 +454,25 @@ public static class MotionExporter
         File.WriteAllBytes(path, d);
     }
 
+    /// A camera VMD with one key: the camera as it is now. `container` supplies the height
+    /// correction (the viewer drops the character's height scale while a camera clip plays;
+    /// the PMX is at the natural height), the same rule Record applies.
+    public static void ExportCameraSnapshot(Camera cam, UmaContainerCharacter container, string path)
+    {
+        if (cam == null) throw new ArgumentNullException(nameof(cam));
+        float posScale = 1f;
+        if (container != null)
+        {
+            var positionRoot = container.transform.Find("Position");
+            float captured = positionRoot != null ? positionRoot.lossyScale.x : container.BodyScale;
+            if (captured > 1e-4f && Mathf.Abs(container.BodyScale / captured - 1f) > 1e-4f) posScale = container.BodyScale / captured;
+        }
+        CameraSample.Reset();
+        var sample = CameraSample.Of(cam);
+        sample.Position *= posScale;
+        WriteCameraVmd(path, new List<byte[]> { sample.ToVmdRecord(0) });
+    }
+
     /// The camera VMD written next to a motion VMD: <stem>_camera.vmd.
     public static string CameraPathFor(string vmdPath)
         => Path.Combine(Path.GetDirectoryName(vmdPath), Path.GetFileNameWithoutExtension(vmdPath) + "_camera.vmd");
