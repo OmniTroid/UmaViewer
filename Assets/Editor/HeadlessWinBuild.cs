@@ -9,6 +9,7 @@ public static class HeadlessWinBuild
         var group = BuildTargetGroup.Standalone;
         var original = PlayerSettings.GetScriptingBackend(group);
         PlayerSettings.SetScriptingBackend(group, ScriptingImplementation.Mono2x);
+        string version = BuildVersioning.Stamp();
         try
         {
             var options = new BuildPlayerOptions
@@ -29,7 +30,7 @@ public static class HeadlessWinBuild
             }
             Debug.Log($"BUILD_OK path={s.outputPath} sizeBytes={s.totalSize}");
         }
-        finally { PlayerSettings.SetScriptingBackend(group, original); }
+        finally { PlayerSettings.SetScriptingBackend(group, original); BuildVersioning.Restore(version); }
         EditorApplication.Exit(0);
     }
 }

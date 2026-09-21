@@ -14,12 +14,9 @@ public static class HeadlessWebBuild
     {
         bool release = Environment.GetCommandLineArgs().Contains("-umaRelease");
 
-        // Bake the 7-char git SHA in as the version, so a build is traceable to its commit and
-        // WebGL data caching (below) invalidates per commit. A dirty tree shares its commit SHA,
-        // so append a timestamp there to keep local rebuilds from serving a stale cached .data.
-        // Restored after the build so it doesn't leave ProjectSettings.asset modified in git.
-        string originalVersion = PlayerSettings.bundleVersion;
-        PlayerSettings.bundleVersion = BuildVersion();
+        // Bake the git SHA in as the version (also the WebGL data-cache key, so caches bust per
+        // commit); restored after the build. See BuildVersioning.
+        string originalVersion = BuildVersioning.Stamp();
 
         PlayerSettings.WebGL.template = "PROJECT:UmaViewer";
         // Decompress gzipped build files in the loader so any static host works, even one
@@ -47,9 +44,7 @@ public static class HeadlessWebBuild
             options = BuildOptions.None,
         };
         var report = BuildPipeline.BuildPlayer(options);
-
-        PlayerSettings.bundleVersion = originalVersion;
-        AssetDatabase.SaveAssets();
+        BuildVersioning.Restore(originalVersion);
 
         var s = report.summary;
         if (s.result != BuildResult.Succeeded)
@@ -60,32 +55,5 @@ public static class HeadlessWebBuild
         }
         Debug.Log($"BUILD_OK path={s.outputPath} sizeBytes={s.totalSize}");
         EditorApplication.Exit(0);
-    }
-
-    static string BuildVersion()
-    {
-        string sha = Git("rev-parse --short=7 HEAD");
-        if (string.IsNullOrEmpty(sha)) return "0000000";
-        bool dirty = !string.IsNullOrEmpty(Git("status --porcelain"));
-        return dirty ? $"{sha}.{DateTime.UtcNow:yyyyMMddHHmmss}" : sha;
-    }
-
-    static string Git(string args)
-    {
-        try
-        {
-            var psi = new System.Diagnostics.ProcessStartInfo("git", args)
-            {
-                WorkingDirectory = System.IO.Path.GetDirectoryName(Application.dataPath),
-                RedirectStandardOutput = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
-            using var p = System.Diagnostics.Process.Start(psi);
-            string outp = p.StandardOutput.ReadToEnd().Trim();
-            p.WaitForExit();
-            return outp;
-        }
-        catch { return ""; }
     }
 }
