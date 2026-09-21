@@ -185,7 +185,9 @@ public class UmaContainerCharacter : UmaContainer
 
     public void MergeModel()
     {
+        Debug.Log($"[MergeModel] enter Body={(Body ? "ok" : "NULL")} Head={(Head ? "ok" : "null")} Tail={(Tail ? "ok" : "null")}");
         if (!Body) return;
+        Debug.Log("[MergeModel] start");
         var bodySkinnedMeshRenderer = Body.GetComponentInChildren<SkinnedMeshRenderer>();
         var bodyBones = bodySkinnedMeshRenderer.bones.ToDictionary(bone => bone.name, bone => bone.transform);
         List<Transform> emptyBones = new List<Transform>();
@@ -242,6 +244,7 @@ public class UmaContainerCharacter : UmaContainer
 
 
         emptyBones.ForEach(a => { if (a) Destroy(a.gameObject); });
+        Debug.Log("[MergeModel] mesh/bone merge done");
 
         //MergeAvatar
         UmaAnimator = gameObject.AddComponent<Animator>();
@@ -272,23 +275,29 @@ public class UmaContainerCharacter : UmaContainer
                 }
             }
         }
+        Debug.Log($"[MergeModel] shader swap over {Renderers.Count} renderers");
         foreach (var rend in Renderers)
         {
             for (int i = 0; i < rend.sharedMaterials.Length; i++)
             {
                 Material mat = rend.sharedMaterials[i];
 
-                if (mat != null && mat.shader != null && !mat.shader.isSupported)
+                // On WebGL a bundle shader can report isSupported=true at merge time (async
+                // GLES3 compile) yet have no usable variant at render, so rebind by name
+                // unconditionally to the in-project shader.
+                bool needsSwap = mat != null && mat.shader != null &&
+                    (WebFileMount.Active || !mat.shader.isSupported);
+                if (needsSwap)
                 {
                     var repl = Shader.Find(mat.shader.name);
-                    if (repl != null && repl.isSupported)
+                    if (repl != null && repl != mat.shader)
                     {
                         Debug.Log($"[MetalShaderSwap] replaced {mat.shader.name}");
                         mat.shader = repl;
                     }
-                    else
+                    else if (!mat.shader.isSupported)
                     {
-                        Debug.LogWarning($"[MetalShaderSwap] no Metal replacement for {mat.shader.name}");
+                        Debug.LogWarning($"[MetalShaderSwap] no replacement for {mat.shader.name}");
                     }
                 }
 
@@ -1598,7 +1607,9 @@ public class UmaContainerCharacter : UmaContainer
                     {
                         LoadedAssets.Add(tearEntry);
                         var ab = UmaAssetManager.LoadAssetBundle(tearEntry, true, false);
-                        var tex = ab.LoadAsset<Texture>("tex_chr_tear00");
+                        // WebGL faults shared common textures in asynchronously, so this
+                        // synchronous load can miss and return null; skip the tear setup then.
+                        var tex = ab ? ab.LoadAsset<Texture>("tex_chr_tear00") : null;
                         StaticTear_L = table["tearmesh_l"] as GameObject;
                         StaticTear_R = table["tearmesh_r"] as GameObject;
                         if (StaticTear_L && StaticTear_R)
@@ -2578,6 +2589,16 @@ public class UmaContainerCharacter : UmaContainer
                 }
             }
         }
-        return Instantiate(entry.Get<GameObject>(), parent.transform);
+
+        // On WebGL a bundle whose file was never faulted into MEMFS loads as null. Skip it with a
+        // diagnostic instead of throwing: a failed physics/cloth bundle must not abort the whole
+        // model load (which would leave it magenta and unposed).
+        var prefab = entry != null ? entry.Get<GameObject>() : null;
+        if (prefab == null)
+        {
+            Debug.LogWarning($"[InstantiateEntry] null prefab for '{entry?.Name}' ({entry?.Path}); skipping");
+            return null;
+        }
+        return Instantiate(prefab, parent.transform);
     }
 }
