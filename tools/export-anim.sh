@@ -7,7 +7,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"; REPO="$(cd "$HERE/.." && pwd)"
 
 DATA=""; CHARA=""; ANIM=""; OUT=""; REGION="jp"; COSTUME="00"; SECS=5; TILES=1; BLINK=""; NOMOUTH=""
-PMXNAME=""; VMDNAME=""; BAKE=""
+PMXNAME=""; VMDNAME=""; BAKE=""; PERIOD=""
 while [ $# -gt 0 ]; do case "$1" in
   --data-path) DATA="$2"; shift 2;;
   --chara)     CHARA="$2"; shift 2;;
@@ -22,13 +22,14 @@ while [ $# -gt 0 ]; do case "$1" in
   --pmx-name)  PMXNAME="$2"; shift 2;;
   --vmd-name)  VMDNAME="$2"; shift 2;;
   --bake-physics) BAKE="--bake-physics"; shift;;
+  --period)    PERIOD="$2"; shift 2;;
   *) echo "unknown arg: $1"; exit 1;;
 esac; done
 
 if [ -z "$DATA" ] || [ -z "$CHARA" ] || [ -z "$ANIM" ] || [ -z "$OUT" ]; then
   echo "usage: $0 --data-path DIR --chara ID --anim NAME --out DIR \\"
   echo "          [--region jp|global] [--costume 00] [--seconds 5] [--tiles N] [--blink] [--no-mouth] \\"
-  echo "          [--pmx-name model.pmx] [--vmd-name running.vmd] [--bake-physics]"
+  echo "          [--pmx-name model.pmx] [--vmd-name running.vmd] [--bake-physics] [--period FRAMES]"
   exit 1
 fi
 
@@ -71,6 +72,9 @@ cp -f "$RAW/$PMXFILE" "$OUT/$PMXFILE"
 [ -d "$RAW/Texture2D" ] && cp -Rf "$RAW/Texture2D" "$OUT/"
 
 echo "Building seamless loop ..."
-"$PY" "$HERE/loopify_vmd.py" "$RAW/$VMDFILE" "$OUT/$VMDFILE" --tiles "$TILES" $BLINK $NOMOUTH
+# --period pins the loop length (in 30fps frames) instead of detecting it; for clips that
+# barely move, the detector can settle on a short sub-cycle.
+PERIODARGS=""; [ -n "$PERIOD" ] && PERIODARGS="--pmin $PERIOD --pmax $((PERIOD+1))"
+"$PY" "$HERE/loopify_vmd.py" "$RAW/$VMDFILE" "$OUT/$VMDFILE" --tiles "$TILES" $BLINK $NOMOUTH $PERIODARGS
 rm -rf "$RAW"
 echo "Done -> $OUT/$PMXFILE + $OUT/$VMDFILE"
