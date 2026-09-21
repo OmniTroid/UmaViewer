@@ -1,4 +1,4 @@
-# Uma Viewer (2)
+# Uma Viewer
 ⚠️ If you see **"Failed to load il2cpp"** or the app cannot start on Windows, it may be blocked by **Windows Smart App Control**.
 
  If it fails, turn off Smart App Control:
