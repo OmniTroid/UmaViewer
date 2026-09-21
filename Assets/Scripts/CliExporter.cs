@@ -172,21 +172,31 @@ public class CliExporter : MonoBehaviour
             if (string.IsNullOrEmpty(animId)) { Fail("--solver-diff needs --anim"); yield break; }
             Gallop.CySpringNative.isNative = true;   // the plugin is the reference; the port is the candidate
             Gallop.CySpringDiff.Reset();
+            Gallop.CySpringSolver.ResetCounters();
             Gallop.CySpringDiff.Armed = true;
             yield return RunSafe(RecordPhysicsRef(container, main, animId, diffPath + ".ref.json"), e => buildErr = e);
             Gallop.CySpringDiff.Armed = false;
             if (buildErr != null) { Fail("solver-diff threw: " + buildErr); yield break; }
+            Debug.Log($"CLI_BRANCH clampCalls={Gallop.CySpringSolver.ClampCalls} clampBites={Gallop.CySpringSolver.ClampBites} collCalls={Gallop.CySpringSolver.CollisionCalls} collHits={Gallop.CySpringSolver.CollisionHits} skirtKnee={Gallop.CySpringSolver.SkirtKneeHits} near180={Gallop.CySpringSolver.ClampNear180} near90y={Gallop.CySpringSolver.ClampNear90y}");
             Gallop.CySpringDiff.Write(diffPath);
             Debug.Log("DIFF" + System.Environment.NewLine + Gallop.CySpringDiff.Report());
             Debug.Log("CLI_EXPORT_DONE " + diffPath);
             Quit(0); yield break;
         }
 
+        // --solver-trace <file.csv>: dump every bone's full solve state, inputs included, on
+        // every call, for comparing two free-running SEQUENCES. Works with either solver, so the
+        // plugin's run and the port's run can be aligned call-for-call afterwards.
+        string tracePath = Opt("--solver-trace");
+
         string physRefPath = Opt("--physics-ref");
         if (!string.IsNullOrEmpty(physRefPath))
         {
+            if (!string.IsNullOrEmpty(tracePath)) { Gallop.CySpringTrace.Reset(); Gallop.CySpringTrace.Armed = true; }
             yield return RunSafe(RecordPhysicsRef(container, main, animId, physRefPath), e => buildErr = e);
             if (buildErr != null) { Fail("physics-ref threw: " + buildErr); yield break; }
+            if (!string.IsNullOrEmpty(tracePath)) { Gallop.CySpringTrace.Armed = false; Gallop.CySpringTrace.Write(tracePath); }
+            Debug.Log($"CLI_BRANCH clampCalls={Gallop.CySpringSolver.ClampCalls} clampBites={Gallop.CySpringSolver.ClampBites} collCalls={Gallop.CySpringSolver.CollisionCalls} collHits={Gallop.CySpringSolver.CollisionHits} skirtKnee={Gallop.CySpringSolver.SkirtKneeHits} near180={Gallop.CySpringSolver.ClampNear180} near90y={Gallop.CySpringSolver.ClampNear90y}");
             Debug.Log("CLI_EXPORT_DONE " + physRefPath);
             Quit(0); yield break;
         }
@@ -475,7 +485,13 @@ public class CliExporter : MonoBehaviour
         if (ctrl != null) ctrl.Is60FpsMode = (physFps == 60);
         Debug.Log($"CLI_EXPORT: physics-ref stepping at {physFps}fps, solver 60fps-mode={(ctrl != null ? ctrl.Is60FpsMode.ToString() : "n/a")}");
 
-        float warm = 0f, warmTarget = Mathf.Max(1.5f, len * 2f);
+        // --warmup <periods>: settle time before recording, in clip lengths. The default lets
+        // the cloth reach steady state; 0 records from the bind pose, which is what a divergence
+        // GROWTH curve needs -- with the default warmup both solvers have already free-run about
+        // a hundred steps by frame 0, so any amplification has long since saturated and the
+        // capture cannot tell a growing error from a constant one.
+        float.TryParse(Opt("--warmup", "2"), out float warmP);
+        float warm = 0f, warmTarget = Mathf.Max(warmP <= 0f ? 0f : 1.5f, len * warmP);
         while (warm < warmTarget) { warm += Time.deltaTime; yield return null; }
 
         var sp = container.GetComponentsInChildren<Transform>(true).Where(t => t.name.StartsWith("Sp_")).ToList();
