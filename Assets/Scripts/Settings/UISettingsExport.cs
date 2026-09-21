@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.IO;
 using SFB;
 using TMPro;
@@ -10,25 +11,32 @@ using UnityEngine.UI;
 /// loaded animation as VMDs, written the same way the CLI writes them (MotionExporter).
 ///
 ///  * Export Model   -- the PMX (+ textures) in MMDRestPose, spring bones baked (no rigid bodies).
-///  * Export Idle    -- the loaded _loop clip, one period, starting at the clip's frame 0.
 ///  * Export Preanim -- the clip's _s build-up, from the shared neutral stance into the pose.
+///  * Export Loop    -- the loaded _loop clip, one period, starting at the clip's frame 0
+///                      (a non-loop clip: start to end, with its camera as <name>_camera.vmd).
 ///
-/// The section is built at start-up from the scene's own sidebar pieces (a header button and
-/// a button row cloned from the Other section), so the scene needs no edit.
+/// The section is built at start-up from the scene's own sidebar pieces (a header button, a
+/// button row and a label cloned from the Other section), so the scene needs no edit.
 public class UISettingsExport : MonoBehaviour
 {
     static UmaViewerBuilder Builder => UmaViewerBuilder.Instance;
     static UmaViewerMain Main => UmaViewerMain.Instance;
     static UmaViewerUI UI => UmaViewerUI.Instance;
 
+    const float RowHeight = 50f;    // the Other section's row height
+    const float InfoHeight = 80f;   // three short lines
+
     Button modelButton, idleButton, preanimButton;
-    TMPro.TMP_Text infoText;
+    TMP_Text infoText;
     bool busy;
     string describedClip;
 
-    /// Build the section under the settings content, right after `after` (a sibling section),
-    /// using `headerTemplate` for the collapsible header and `rowTemplate` for button rows.
-    public static UISettingsExport Create(Transform after, Button headerTemplate, GameObject rowTemplate, Transform sectionTemplate)
+    /// Build the section under the settings content, right after `after` (a sibling section).
+    /// `headerTemplate` is a collapsible section header, `sectionTemplate` the Other section
+    /// (its Image and VerticalLayoutGroup are kept, its rows and component dropped),
+    /// `rowTemplate` one of its button rows and `labelTemplate` one of its row labels.
+    public static UISettingsExport Create(Transform after, Button headerTemplate, Transform sectionTemplate,
+                                          GameObject rowTemplate, TMP_Text labelTemplate)
     {
         var content = after.parent;
 
@@ -37,33 +45,120 @@ public class UISettingsExport : MonoBehaviour
         SetLabel(header.gameObject, "Export");
         header.transform.SetSiblingIndex(after.GetSiblingIndex() + 1);
 
-        // A section is an Image + VerticalLayoutGroup; copy the template's look and drop its
-        // rows and its own settings component.
         var section = Instantiate(sectionTemplate.gameObject, content);
         section.name = "Export";
         section.transform.SetSiblingIndex(header.transform.GetSiblingIndex() + 1);
-        foreach (var mb in section.GetComponents<MonoBehaviour>()) Destroy(mb);
+        foreach (var mb in section.GetComponents<MonoBehaviour>())
+            if (!(mb is LayoutGroup) && !(mb is Graphic)) Destroy(mb);   // keep the background and the layout
         for (int i = section.transform.childCount - 1; i >= 0; i--) Destroy(section.transform.GetChild(i).gameObject);
+        // Rows keep their own heights instead of sharing the box: the info row is not a button.
+        var layout = section.GetComponent<VerticalLayoutGroup>();
+        if (layout != null)
+        {
+            layout.childControlHeight = false;
+            layout.childForceExpandHeight = false;
+            layout.childAlignment = TextAnchor.UpperCenter;
+        }
         section.SetActive(false);
 
         header.onClick = new Button.ButtonClickedEvent();   // not the template's persistent call
         header.onClick.AddListener(() => UI.ToggleUIPanel(section));
 
         var panel = section.AddComponent<UISettingsExport>();
-        panel.modelButton = panel.AddRow(rowTemplate, "Export Model (PMX)", panel.ExportModel);
-        panel.preanimButton = panel.AddRow(rowTemplate, "Export Preanim", () => panel.StartCoroutine(panel.ExportCurrentMotion(true)));
-        panel.idleButton = panel.AddRow(rowTemplate, "Export Loop", () => panel.StartCoroutine(panel.ExportCurrentMotion(false)));
-        // A text row (cloned from a header's label) describing the loaded animation, from MotionProbe.
-        var info = Instantiate(headerTemplate.GetComponentInChildren<TMPro.TMP_Text>(true), section.transform);
-        info.name = "Info"; info.text = ""; info.fontSize = Mathf.Max(10f, info.fontSize * 0.75f);
-        info.alignment = TMPro.TextAlignmentOptions.TopLeft; info.enableWordWrapping = true;
-        panel.infoText = info;
+        panel.infoText = panel.AddInfoRow(rowTemplate, labelTemplate);
+        panel.modelButton = panel.AddButtonRow(rowTemplate, "Export Model (PMX)", panel.ExportModel);
+        panel.preanimButton = panel.AddButtonRow(rowTemplate, "Export Preanim", () => panel.StartCoroutine(panel.ExportCurrentMotion(true)));
+        panel.idleButton = panel.AddButtonRow(rowTemplate, "Export Loop", () => panel.StartCoroutine(panel.ExportCurrentMotion(false)));
+
+        var rt = section.GetComponent<RectTransform>();
+        rt.sizeDelta = new Vector2(rt.sizeDelta.x, InfoHeight + 3f * RowHeight);
         return panel;
+    }
+
+    Button AddButtonRow(GameObject rowTemplate, string label, UnityEngine.Events.UnityAction onClick)
+    {
+        var row = Instantiate(rowTemplate, transform);
+        row.name = label;
+        row.SetActive(true);
+        var rt = row.GetComponent<RectTransform>();
+        rt.sizeDelta = new Vector2(rt.sizeDelta.x, RowHeight);
+        var button = row.GetComponentInChildren<Button>(true);
+        button.onClick = new Button.ButtonClickedEvent();
+        button.onClick.AddListener(onClick);
+        SetLabel(row, label);
+        return button;
+    }
+
+    TMP_Text AddInfoRow(GameObject rowTemplate, TMP_Text labelTemplate)
+    {
+        var row = Instantiate(rowTemplate, transform);
+        row.name = "Info";
+        row.SetActive(true);
+        for (int i = row.transform.childCount - 1; i >= 0; i--) Destroy(row.transform.GetChild(i).gameObject);
+        var rt = row.GetComponent<RectTransform>();
+        rt.sizeDelta = new Vector2(rt.sizeDelta.x, InfoHeight);
+
+        var text = Instantiate(labelTemplate, row.transform);
+        text.name = "Text";
+        var trt = text.GetComponent<RectTransform>();
+        trt.anchorMin = Vector2.zero; trt.anchorMax = Vector2.one;
+        trt.offsetMin = new Vector2(10f, 4f); trt.offsetMax = new Vector2(-10f, -4f);
+        text.fontSize = 14f;
+        text.enableAutoSizing = false;
+        text.enableWordWrapping = true;
+        text.overflowMode = TextOverflowModes.Ellipsis;
+        text.alignment = TextAlignmentOptions.TopLeft;
+        text.text = "No animation loaded";
+        return text;
+    }
+
+    static void SetLabel(GameObject root, string label)
+    {
+        var tmp = root.GetComponentInChildren<TMP_Text>(true);
+        if (tmp) { tmp.text = label; return; }
+        var text = root.GetComponentInChildren<Text>(true);
+        if (text) text.text = label;
+    }
+
+    static string GetLabel(Button b)
+    {
+        if (!b) return null;
+        var tmp = b.GetComponentInChildren<TMP_Text>(true);
+        if (tmp) return tmp.text;
+        var text = b.GetComponentInChildren<Text>(true);
+        return text ? text.text : null;
+    }
+
+    void SetBusy(bool on, Button which = null, string label = null)
+    {
+        busy = on;
+        foreach (var b in new[] { modelButton, idleButton, preanimButton }) if (b) b.interactable = !on;
+        if (which && label != null) SetLabel(which.gameObject, label);
+    }
+
+    /// Three short lines about the loaded animation, from MotionProbe.
+    static string Summary(MotionProbe.Result r)
+    {
+        string Short(UmaDatabaseEntry e) => e == null ? null : e.Name.Substring(e.Name.LastIndexOf('/') + 1);
+        string Frames(float s) => s < 0f ? "?" : Mathf.RoundToInt(s * 30f) + "f";
+        var parts = new List<string>();
+        if (r.Loop != null) parts.Add("loop " + Frames(r.LoopSeconds));
+        if (r.Start != null) parts.Add("preanim " + Frames(r.StartSeconds));
+        if (r.End != null) parts.Add("end " + Frames(r.EndSeconds));
+        if (r.IsOneShot) parts.Add("one-shot " + Frames(r.Seconds));
+        var extras = new List<string>();
+        if (r.HasCamera) extras.Add("camera");
+        if (r.Position != null) extras.Add("root motion");
+        if (r.IsChain) extras.Add(r.Chain.Count + "-cut chain");
+        if (r.Facial != null) extras.Add("face");
+        return Short(r.Entry) + "\n"
+             + (parts.Count > 0 ? string.Join(" | ", parts) : r.Part) + "\n"
+             + (extras.Count > 0 ? string.Join(" | ", extras) : "no companions");
     }
 
     void Update()
     {
-        // Keep the description and the buttons in step with whatever animation is loaded.
+        // Keep the summary and the buttons in step with whatever animation is loaded.
         var container = Builder != null ? Builder.CurrentUMAContainer : null;
         var clip = container != null && container.OverrideController != null ? container.OverrideController["clip_2"] : null;
         string name = clip != null && clip.name != "clip_2" ? clip.name : null;
@@ -76,41 +171,14 @@ public class UISettingsExport : MonoBehaviour
             if (idleButton) idleButton.interactable = false;
             return;
         }
-        var r = MotionProbe.Probe(Main, name, loadClips: false);
-        if (infoText) infoText.text = MotionProbe.Describe(r);
+        var r = MotionProbe.Probe(Main, name, loadClips: true);
+        if (infoText) infoText.text = Summary(r);
         if (preanimButton) preanimButton.interactable = !busy && r.HasPreanim;
         if (idleButton)
         {
             idleButton.interactable = !busy && r.Entry != null;
-            SetLabel(idleButton.gameObject, r.IsLoop ? "Export Loop" : "Export Animation" + (r.HasCamera ? " + Camera" : ""));
+            SetLabel(idleButton.gameObject, r.IsLoop ? "Export Loop" : r.IsChain ? "Export Cut-in Chain" : "Export Animation");
         }
-    }
-
-    Button AddRow(GameObject rowTemplate, string label, UnityEngine.Events.UnityAction onClick)
-    {
-        var row = Instantiate(rowTemplate, transform);
-        row.name = label;
-        row.SetActive(true);
-        var button = row.GetComponentInChildren<Button>(true);
-        button.onClick = new Button.ButtonClickedEvent();
-        button.onClick.AddListener(onClick);
-        SetLabel(row, label);
-        return button;
-    }
-
-    static void SetLabel(GameObject root, string label)
-    {
-        var tmp = root.GetComponentInChildren<TextMeshProUGUI>(true);
-        if (tmp) { tmp.text = label; return; }
-        var text = root.GetComponentInChildren<Text>(true);
-        if (text) text.text = label;
-    }
-
-    void SetBusy(bool on, Button which = null, string label = null)
-    {
-        busy = on;
-        foreach (var b in new[] { modelButton, idleButton, preanimButton }) if (b) b.interactable = !on;
-        if (which && label != null) SetLabel(which.gameObject, label);
     }
 
     public void ExportModel()
@@ -162,7 +230,7 @@ public class UISettingsExport : MonoBehaviour
         var target = loaded;
         if (preanim)
         {
-            target = MotionExporter.StartClipOf(Main, loaded.Name);
+            target = MotionProbe.StartClipOf(Main, loaded.Name);
             if (target == null)
             {
                 UI.ShowMessage($"{Path.GetFileName(loaded.Name)} has no build-up (_s) clip", UIMessageType.Warning);
@@ -175,7 +243,7 @@ public class UISettingsExport : MonoBehaviour
         string vmdPath = Path.Combine(dirs[0], Path.GetFileName(target.Name) + ".vmd");
 
         var button = preanim ? preanimButton : idleButton;
-        string label = button ? button.GetComponentInChildren<TMPro.TMP_Text>(true)?.text ?? button.GetComponentInChildren<Text>(true)?.text : null;
+        string label = GetLabel(button);
         SetBusy(true, button, "Exporting...");
 
         Exception err = null;
@@ -185,13 +253,17 @@ public class UISettingsExport : MonoBehaviour
         if (preanim) container.LoadAnimation(loaded);   // Record left the _s clip in the slot
         UI.LoadedAnimation();                             // reapply the panel's speed setting
         SetBusy(false, button, label);
-        describedClip = null;   // re-probe: buttons back to the loaded animation's state
+        describedClip = null;                             // re-probe: buttons back to the loaded animation's state
         if (err != null)
         {
             Debug.LogException(err);
             UI.ShowMessage("Export failed: " + err.Message, UIMessageType.Error);
         }
-        else UI.ShowMessage($"Saved {vmdPath}" + (File.Exists(MotionExporter.CameraPathFor(vmdPath)) ? $" and {Path.GetFileName(MotionExporter.CameraPathFor(vmdPath))}" : ""), UIMessageType.Success);
+        else
+        {
+            string camPath = MotionExporter.CameraPathFor(vmdPath);
+            UI.ShowMessage($"Saved {vmdPath}" + (File.Exists(camPath) ? $" and {Path.GetFileName(camPath)}" : ""), UIMessageType.Success);
+        }
 #else
         UI.ShowMessage("Not supported on this platform", UIMessageType.Warning);
         yield break;

@@ -1392,12 +1392,13 @@ public class UmaViewerUI : MonoBehaviour
         int idx = screenshot.GetSiblingIndex();
         var header = idx > 0 ? screenshot.parent.GetChild(idx - 1).GetComponent<Button>() : null;
         var row = other.Find("UpdateDatabase");
-        if (header == null || row == null)
+        var label = other.Find("Language/Text (TMP)")?.GetComponent<TMPro.TMP_Text>();
+        if (header == null || row == null || label == null)
         {
             Debug.LogWarning("[UmaViewerUI] Export section templates not found; section not added.");
             return;
         }
-        var panel = UISettingsExport.Create(screenshot, header, row.gameObject, other);
+        var panel = UISettingsExport.Create(screenshot, header, other, row.gameObject, label);
         Debug.Log($"[UmaViewerUI] Export section added ({panel.transform.childCount} rows)");
     }
 
