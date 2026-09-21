@@ -14,13 +14,17 @@ public static class HeadlessWebBuild
     {
         bool release = Environment.GetCommandLineArgs().Contains("-umaRelease");
 
+        // Unique per build so WebGL data caching (below) invalidates on every rebuild: a new
+        // deploy re-downloads once, and local rebuilds never serve a stale cached Build/Web.data.
+        PlayerSettings.bundleVersion = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
+
         PlayerSettings.WebGL.template = "PROJECT:UmaViewer";
         // Decompress gzipped build files in the loader so any static host works, even one
         // that doesn't send Content-Encoding: gzip (e.g. python3 -m http.server).
         PlayerSettings.WebGL.decompressionFallback = true;
-        // Debug: no data caching so a rebuilt Build/Web.data doesn't serve stale over the same
-        // URL. Release: cache it so returning visitors don't re-download ~46MB every load.
-        PlayerSettings.WebGL.dataCaching = release;
+        // Cache Build/Web.data in the browser so returning visitors don't re-download ~46MB every
+        // load. Unity keys the cache by the productVersion set above, which busts it per build.
+        PlayerSettings.WebGL.dataCaching = true;
         // Debug: full managed stack traces so caught exceptions can be located. Release: the lean
         // default (explicitly-thrown only), smaller and faster.
         PlayerSettings.WebGL.exceptionSupport = release
