@@ -173,11 +173,17 @@ public class CliExporter : MonoBehaviour
             Gallop.CySpringNative.isNative = true;   // the plugin is the reference; the port is the candidate
             Gallop.CySpringDiff.Reset();
             Gallop.CySpringSolver.ResetCounters();
+            float.TryParse(Opt("--solver-diff-collide", "1"), System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out float collideScale);
+            Gallop.CySpringDiff.CollideScale = collideScale;
+            Gallop.CySpringDiff.CollideMode = Opt("--solver-diff-collide-mode", "");
+            if (collideScale != 1f) Debug.Log($"CLI_EXPORT: solver-diff scaling collider radii by {collideScale}");
             Gallop.CySpringDiff.Armed = true;
             yield return RunSafe(RecordPhysicsRef(container, main, animId, diffPath + ".ref.json"), e => buildErr = e);
             Gallop.CySpringDiff.Armed = false;
             if (buildErr != null) { Fail("solver-diff threw: " + buildErr); yield break; }
-            Debug.Log($"CLI_BRANCH clampCalls={Gallop.CySpringSolver.ClampCalls} clampBites={Gallop.CySpringSolver.ClampBites} collCalls={Gallop.CySpringSolver.CollisionCalls} collHits={Gallop.CySpringSolver.CollisionHits} skirtKnee={Gallop.CySpringSolver.SkirtKneeHits} near180={Gallop.CySpringSolver.ClampNear180} near90y={Gallop.CySpringSolver.ClampNear90y}");
+            Debug.Log($"CLI_BRANCH clampCalls={Gallop.CySpringSolver.ClampCalls} clampBites={Gallop.CySpringSolver.ClampBites} collCalls={Gallop.CySpringSolver.CollisionCalls} collHits={Gallop.CySpringSolver.CollisionHits} sphere={Gallop.CySpringSolver.HitSphere} capMid={Gallop.CySpringSolver.HitCapsuleMid} capEnd={Gallop.CySpringSolver.HitCapsuleEnd} plane={Gallop.CySpringSolver.HitPlane} inner={Gallop.CySpringSolver.SeenInner} skipChara={Gallop.CySpringSolver.SkipChara} skirtKnee={Gallop.CySpringSolver.SkirtKneeHits} near180={Gallop.CySpringSolver.ClampNear180} near90y={Gallop.CySpringSolver.ClampNear90y}");
+            Debug.Log("CLI_COLL types=" + string.Join(",", Gallop.CySpringSolver.TypeSeen) + " disabled=" + Gallop.CySpringSolver.SkipDisabled);
             Gallop.CySpringDiff.Write(diffPath);
             Debug.Log("DIFF" + System.Environment.NewLine + Gallop.CySpringDiff.Report());
             Debug.Log("CLI_EXPORT_DONE " + diffPath);
@@ -196,7 +202,7 @@ public class CliExporter : MonoBehaviour
             yield return RunSafe(RecordPhysicsRef(container, main, animId, physRefPath), e => buildErr = e);
             if (buildErr != null) { Fail("physics-ref threw: " + buildErr); yield break; }
             if (!string.IsNullOrEmpty(tracePath)) { Gallop.CySpringTrace.Armed = false; Gallop.CySpringTrace.Write(tracePath); }
-            Debug.Log($"CLI_BRANCH clampCalls={Gallop.CySpringSolver.ClampCalls} clampBites={Gallop.CySpringSolver.ClampBites} collCalls={Gallop.CySpringSolver.CollisionCalls} collHits={Gallop.CySpringSolver.CollisionHits} skirtKnee={Gallop.CySpringSolver.SkirtKneeHits} near180={Gallop.CySpringSolver.ClampNear180} near90y={Gallop.CySpringSolver.ClampNear90y}");
+            Debug.Log($"CLI_BRANCH clampCalls={Gallop.CySpringSolver.ClampCalls} clampBites={Gallop.CySpringSolver.ClampBites} collCalls={Gallop.CySpringSolver.CollisionCalls} collHits={Gallop.CySpringSolver.CollisionHits} sphere={Gallop.CySpringSolver.HitSphere} capMid={Gallop.CySpringSolver.HitCapsuleMid} capEnd={Gallop.CySpringSolver.HitCapsuleEnd} plane={Gallop.CySpringSolver.HitPlane} inner={Gallop.CySpringSolver.SeenInner} skipChara={Gallop.CySpringSolver.SkipChara} skirtKnee={Gallop.CySpringSolver.SkirtKneeHits} near180={Gallop.CySpringSolver.ClampNear180} near90y={Gallop.CySpringSolver.ClampNear90y}");
             Debug.Log("CLI_EXPORT_DONE " + physRefPath);
             Quit(0); yield break;
         }
