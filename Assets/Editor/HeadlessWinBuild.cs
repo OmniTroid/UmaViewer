@@ -1,3 +1,5 @@
+using System;
+using System.Linq;
 using UnityEditor;
 using UnityEditor.Build.Reporting;
 using UnityEngine;
@@ -6,6 +8,9 @@ public static class HeadlessWinBuild
 {
     public static void BuildMono()
     {
+        // --release (tools/build-win.sh --release) builds a plain release player; the default is
+        // a Development build (profiler + script debugging) for local iteration.
+        bool release = Environment.GetCommandLineArgs().Contains("--release");
         var group = BuildTargetGroup.Standalone;
         var original = PlayerSettings.GetScriptingBackend(group);
         PlayerSettings.SetScriptingBackend(group, ScriptingImplementation.Mono2x);
@@ -17,7 +22,7 @@ public static class HeadlessWinBuild
                 scenes = new[] { "Assets/Scenes/Version2.unity", "Assets/Scenes/LiveScene.unity" },
                 locationPathName = "Build/Windows/UmaViewer.exe",
                 target = BuildTarget.StandaloneWindows64,
-                options = BuildOptions.None,
+                options = release ? BuildOptions.None : BuildOptions.Development,
             };
             var report = BuildPipeline.BuildPlayer(options);
             var s = report.summary;
