@@ -75,7 +75,10 @@ tools/export-anim.sh --data-path /path/to/Persistent --chara 1127 \
 It records `--seconds` of raw motion, runs `tools/loopify_vmd.py` (full-body resample → fundamental-period search → tail crossfade → optional blink/mouth-strip), and leaves the PMX + textures + a seamless VMD. Runs on macOS/Linux and Git Bash/WSL on Windows; set `UMAVIEWER_BIN` to point at a player elsewhere. `--tiles N` repeats the loop (e.g. a less frequent blink).
 `--period N` pins the loop length to N frames (30fps) instead of detecting it. Use it when the
 detector settles on a short sub-cycle -- a held pose like `salute01_loop` barely moves, and its
-60-frame cycle was being cut to 8. The clip length is what `--physics-ref` reports as the frame count.
+60-frame cycle was being cut to 8. The clip length is logged as `CLI_CLIP` during the export. A pinned
+period also starts the loop at the capture start (`loopify_vmd.py --start 0`), which the player aligns
+to the clip's own frame 0 (`CLI_PHASE` reports where it landed) instead of searching for the best seam.
+Without `--period`, the seam search picks the phase.
 
 The wrapper forwards `--pmx-name`, `--vmd-name` and `--bake-physics` to the player. `loopify_vmd.py` tiles every track it finds, so baked cloth survives the loop build; its `--seam-cloth` option also weighs those tracks when choosing the loop phase, which it otherwise picks from the humanoid bones alone.
 
