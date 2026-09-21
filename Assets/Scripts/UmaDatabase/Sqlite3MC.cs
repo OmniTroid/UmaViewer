@@ -16,8 +16,8 @@ public static class Sqlite3MC
 	private const string DLL = "sqlite3mc_mac";   // libsqlite3mc_mac.dylib
 	#elif UNITY_ANDROID
 	private const string DLL = "sqlite3mcandroid"; // libsqlite3mcandroid.so
-	#elif (UNITY_IOS || UNITY_IPHONE) && !UNITY_EDITOR
-	private const string DLL = "__Internal";      // libsqlite3mc_static.a
+	#elif (UNITY_IOS || UNITY_IPHONE || UNITY_WEBGL) && !UNITY_EDITOR
+	private const string DLL = "__Internal";      // static: iOS libsqlite3mc_static.a, WebGL sqlite3mc.wasm plugin
 	#else
 	private const string DLL = "sqlite3mc";
 	#endif

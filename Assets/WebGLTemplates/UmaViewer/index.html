@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <title>{{{ PRODUCT_NAME }}}</title>
+    <link rel="shortcut icon" href="TemplateData/favicon.ico">
+    <link rel="stylesheet" href="TemplateData/style.css">
+    <style>
+      #uma-gate {
+        position: fixed; inset: 0; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 16px;
+        background: #1b1b20; color: #eee; font: 15px/1.5 system-ui, sans-serif;
+        text-align: center; padding: 24px;
+      }
+      #uma-gate h1 { font-size: 20px; margin: 0; font-weight: 600; }
+      #uma-gate p { max-width: 460px; margin: 0; color: #aaa; }
+      #uma-pick {
+        padding: 10px 20px; font-size: 15px; border: 0; border-radius: 6px;
+        background: #4f6cff; color: #fff; cursor: pointer;
+      }
+      #uma-pick:disabled { background: #444; cursor: default; }
+      #uma-gate small { color: #888; }
+      #uma-err { color: #ff6b6b; min-height: 1em; }
+    </style>
+  </head>
+  <body>
+    <div id="unity-container" class="unity-desktop" hidden>
+      <canvas id="unity-canvas" width={{{ WIDTH }}} height={{{ HEIGHT }}} tabindex="-1"></canvas>
+      <div id="unity-loading-bar">
+        <div id="unity-logo"></div>
+        <div id="unity-progress-bar-empty">
+          <div id="unity-progress-bar-full"></div>
+        </div>
+      </div>
+      <div id="unity-warning"> </div>
+      <div id="unity-footer">
+        <div id="unity-webgl-logo"></div>
+        <div id="unity-fullscreen-button"></div>
+        <div id="unity-build-title">{{{ PRODUCT_NAME }}}</div>
+      </div>
+    </div>
+
+    <div id="uma-gate">
+      <h1>{{{ PRODUCT_NAME }}}</h1>
+      <p>Select your umamusume data folder (the one containing <code>meta</code> and <code>dat/</code>, e.g. <code>Cygames/umamusume</code>). Nothing is uploaded; files are read locally in your browser.</p>
+      <button id="uma-pick">Select data folder</button>
+      <div id="uma-err"></div>
+      <small>Requires a Chromium browser (File System Access API).</small>
+    </div>
+
+    <script>
+      var container = document.querySelector("#unity-container");
+      var canvas = document.querySelector("#unity-canvas");
+      var loadingBar = document.querySelector("#unity-loading-bar");
+      var progressBarFull = document.querySelector("#unity-progress-bar-full");
+      var fullscreenButton = document.querySelector("#unity-fullscreen-button");
+      var warningBanner = document.querySelector("#unity-warning");
+
+      function unityShowBanner(msg, type) {
+        function updateBannerVisibility() {
+          warningBanner.style.display = warningBanner.children.length ? 'block' : 'none';
+        }
+        var div = document.createElement('div');
+        div.innerHTML = msg;
+        warningBanner.appendChild(div);
+        if (type == 'error') div.style = 'background: red; padding: 10px;';
+        else {
+          if (type == 'warning') div.style = 'background: yellow; padding: 10px;';
+          setTimeout(function() {
+            warningBanner.removeChild(div);
+            updateBannerVisibility();
+          }, 5000);
+        }
+        updateBannerVisibility();
+      }
+
+      var buildUrl = "Build";
+      var loaderUrl = buildUrl + "/{{{ LOADER_FILENAME }}}";
+      var config = {
+        dataUrl: buildUrl + "/{{{ DATA_FILENAME }}}",
+        frameworkUrl: buildUrl + "/{{{ FRAMEWORK_FILENAME }}}",
+#if USE_WASM
+        codeUrl: buildUrl + "/{{{ CODE_FILENAME }}}",
+#endif
+#if MEMORY_FILENAME
+        memoryUrl: buildUrl + "/{{{ MEMORY_FILENAME }}}",
+#endif
+#if SYMBOLS_FILENAME
+        symbolsUrl: buildUrl + "/{{{ SYMBOLS_FILENAME }}}",
+#endif
+        streamingAssetsUrl: "StreamingAssets",
+        companyName: {{{ JSON.stringify(COMPANY_NAME) }}},
+        productName: {{{ JSON.stringify(PRODUCT_NAME) }}},
+        productVersion: {{{ JSON.stringify(PRODUCT_VERSION) }}},
+        showBanner: unityShowBanner,
+      };
+
+      canvas.style.width = "{{{ WIDTH }}}px";
+      canvas.style.height = "{{{ HEIGHT }}}px";
+
+      function boot() {
+        document.querySelector("#uma-gate").remove();
+        container.hidden = false;
+        loadingBar.style.display = "block";
+        var script = document.createElement("script");
+        script.src = loaderUrl;
+        script.onload = () => {
+          createUnityInstance(canvas, config, (progress) => {
+            progressBarFull.style.width = 100 * progress + "%";
+          }).then((unityInstance) => {
+            loadingBar.style.display = "none";
+            fullscreenButton.onclick = () => { unityInstance.SetFullscreen(1); };
+          }).catch((message) => {
+            unityShowBanner(message, 'error');
+          });
+        };
+        document.body.appendChild(script);
+      }
+
+      var pickBtn = document.querySelector("#uma-pick");
+      var errBox = document.querySelector("#uma-err");
+      pickBtn.onclick = async () => {
+        if (!window.showDirectoryPicker) {
+          errBox.textContent = "This browser has no File System Access API. Use Chrome, Edge, or another Chromium browser.";
+          return;
+        }
+        try {
+          var root = await window.showDirectoryPicker({ id: 'uma-data', mode: 'read' });
+          window.__umaFS = { root: root, rootPrefix: '/uma/', ready: true };
+          pickBtn.disabled = true;
+          pickBtn.textContent = "Loading...";
+          boot();
+        } catch (e) {
+          if (e && e.name === 'AbortError') return;
+          errBox.textContent = "Could not open the folder: " + (e && e.message ? e.message : e);
+        }
+      };
+    </script>
+  </body>
+</html>

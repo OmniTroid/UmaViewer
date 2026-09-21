@@ -40,6 +40,13 @@ public class UmaViewerMain : MonoBehaviour
         if (Config.Instance == null) new Config();
         ApplyFrameRateLimit();
 
+        // On WebGL the meta/master DBs are faulted into MEMFS in Emscripten preRun
+        // (UmaDBPreload.jspre) before any script runs, so this open works here too.
+        InitDatabase();
+    }
+
+    private void InitDatabase()
+    {
         AbList = UmaDatabaseController.Instance.MetaEntries;
         if (AbList == null) return;
         var chara_3d = AbList.Where(ab => ab.Value.Type == UmaFileType._3d_cutt).Select(ab => ab.Value).ToList();
@@ -201,6 +208,7 @@ public class UmaViewerMain : MonoBehaviour
         var asset = AbList["livesettings"];
         if (asset != null)
         {
+            if (WebFileMount.Active) yield return UmaAssetManager.EnsureBundleFiles(asset);
             string filePath = asset.FilePath;
             if (File.Exists(filePath))
             {
@@ -250,6 +258,7 @@ public class UmaViewerMain : MonoBehaviour
         loadingUI.LoadingProgressChange(-1, -1);
 
         //Load Shader First
+        if (WebFileMount.Active) yield return UmaAssetManager.EnsureBundleFiles(AbList["shader"]);
         var shaders = UmaAssetManager.LoadAssetBundle(AbList["shader"], true);
         Builder.ShaderList = new List<Shader>(shaders.LoadAllAssets<Shader>()); 
         Gallop.ShaderManager.InitManager();
