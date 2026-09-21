@@ -20,6 +20,10 @@
         background: #4f6cff; color: #fff; cursor: pointer;
       }
       #uma-pick:disabled { background: #444; cursor: default; }
+      #uma-other {
+        padding: 4px 8px; font-size: 13px; border: 0; background: none;
+        color: #8ea0ff; cursor: pointer; text-decoration: underline;
+      }
       #uma-gate small { color: #888; }
       #uma-err { color: #ff6b6b; min-height: 1em; }
     </style>
@@ -39,6 +43,7 @@
       <h1>{{{ PRODUCT_NAME }}}</h1>
       <p>Select your umamusume data folder (the one containing <code>meta</code> and <code>dat/</code>, e.g. <code>Cygames/umamusume</code>). Nothing is uploaded; files are read locally in your browser.</p>
       <button id="uma-pick">Select data folder</button>
+      <button id="uma-other" hidden>Choose a different folder…</button>
       <div id="uma-err"></div>
       <small>Requires a Chromium browser (File System Access API).</small>
     </div>
@@ -111,23 +116,73 @@
       }
 
       var pickBtn = document.querySelector("#uma-pick");
+      var otherBtn = document.querySelector("#uma-other");
       var errBox = document.querySelector("#uma-err");
-      pickBtn.onclick = async () => {
+
+      // Remember the picked data folder so return visits skip the folder navigation. A directory
+      // handle is a structured-cloneable object, so it lives in IndexedDB (a string path in a
+      // cookie/localStorage can't be reopened). Fully client-side, so it works on static hosting.
+      var IDB_NAME = "uma-fs", IDB_STORE = "handles", IDB_KEY = "dataDir";
+      function idb(run) {
+        return new Promise(function (resolve, reject) {
+          var open = indexedDB.open(IDB_NAME, 1);
+          open.onupgradeneeded = function () { open.result.createObjectStore(IDB_STORE); };
+          open.onerror = function () { reject(open.error); };
+          open.onsuccess = function () {
+            var db = open.result;
+            var tx = db.transaction(IDB_STORE, "readwrite");
+            var req = run(tx.objectStore(IDB_STORE));
+            tx.oncomplete = function () { db.close(); resolve(req ? req.result : undefined); };
+            tx.onerror = function () { db.close(); reject(tx.error); };
+          };
+        });
+      }
+      function saveHandle(h) { return idb(function (s) { return s.put(h, IDB_KEY); }); }
+      function loadHandle() { return idb(function (s) { return s.get(IDB_KEY); }); }
+
+      function start(handle) {
+        window.__umaFS = { root: handle, rootPrefix: '/uma/', ready: true };
+        pickBtn.disabled = true;
+        pickBtn.textContent = "Loading...";
+        boot();
+      }
+
+      async function pickFresh() {
         if (!window.showDirectoryPicker) {
           errBox.textContent = "This browser has no File System Access API. Use Chrome, Edge, or another Chromium browser.";
           return;
         }
         try {
           var root = await window.showDirectoryPicker({ id: 'uma-data', mode: 'read' });
-          window.__umaFS = { root: root, rootPrefix: '/uma/', ready: true };
-          pickBtn.disabled = true;
-          pickBtn.textContent = "Loading...";
-          boot();
+          try { await saveHandle(root); } catch (e) {}
+          start(root);
         } catch (e) {
           if (e && e.name === 'AbortError') return;
           errBox.textContent = "Could not open the folder: " + (e && e.message ? e.message : e);
         }
-      };
+      }
+
+      pickBtn.onclick = pickFresh;
+      otherBtn.onclick = pickFresh;
+
+      // On load, reopen the last folder: boot straight in if permission survived, otherwise offer
+      // a one-click reopen (re-granting permission needs a user gesture).
+      (async function () {
+        var saved = null;
+        try { saved = await loadHandle(); } catch (e) {}
+        if (!saved) return;
+        var perm = "prompt";
+        try { perm = await saved.queryPermission({ mode: 'read' }); } catch (e) {}
+        if (perm === "granted") { start(saved); return; }
+        pickBtn.textContent = 'Reopen "' + saved.name + '"';
+        otherBtn.hidden = false;
+        pickBtn.onclick = async function () {
+          var granted = "denied";
+          try { granted = await saved.requestPermission({ mode: 'read' }); } catch (e) {}
+          if (granted === "granted") start(saved);
+          else errBox.textContent = "Permission denied. Pick the folder again.";
+        };
+      })();
     </script>
   </body>
 </html>
