@@ -96,8 +96,8 @@
         showBanner: unityShowBanner,
       };
 
-      canvas.style.width = "{{{ WIDTH }}}px";
-      canvas.style.height = "{{{ HEIGHT }}}px";
+      // Canvas size is driven by CSS (fills the viewport); Unity matches the drawing buffer to
+      // the canvas client size, so don't pin it to the fixed build WIDTH/HEIGHT here.
 
       function boot() {
         document.querySelector("#uma-gate").remove();
