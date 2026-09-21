@@ -262,6 +262,7 @@ public class CliExporter : MonoBehaviour
             container.EnableEyeTracking = false;
             float len = (clip != null && clip.length > 0.01f) ? clip.length : 5f;
             bool isLoop = animId.Contains("loop") || (clip != null && clip.name.Contains("loop"));
+            Debug.Log($"CLI_CLIP: {anim.Name} length={len:F3}s ({Mathf.RoundToInt(len * 30f)} frames at 30fps) loop={isLoop}");
 
             // Deterministic capture: lock game time to a fixed 1/30 step (frame count and
             // pose sampling no longer depend on wall-clock speed), and force the job system
