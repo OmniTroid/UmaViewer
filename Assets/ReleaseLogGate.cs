@@ -20,8 +20,11 @@ public static class ReleaseLogGate
         // unspecified order, so a decision made elsewhere could be overwritten by this one.
         var argv = Environment.GetCommandLineArgs();
         bool headless = argv.Contains("--export") || argv.Contains("--verbose");
-        Debug.unityLogger.logEnabled = headless;
-        if (headless) Debug.unityLogger.filterLogType = LogType.Log;
+        // The WebGL player has no player.log; the browser console is its only output channel,
+        // so keep logging on there (matches the headless rationale above).
+        bool web = Application.platform == RuntimePlatform.WebGLPlayer;
+        Debug.unityLogger.logEnabled = headless || web;
+        if (headless || web) Debug.unityLogger.filterLogType = LogType.Log;
 #endif
     }
 }

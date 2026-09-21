@@ -97,6 +97,16 @@ public class UmaDatabaseController
                 masterDb = new SqliteConnection($@"Data Source={Config.Instance.MainPath}/master/master.mdb;");
             }
 
+#if UNITY_WEBGL && !UNITY_EDITOR
+            // Mono.Data.Sqlite's DllImport("sqlite3") can't dynamically link on WebGL, so read
+            // meta straight through the statically linked Sqlite3MC path instead of attempting
+            // metaDb.Open() (which only ever fails into this same fallback and logs a dlopen error).
+            {
+                var dbPath = $@"{Config.Instance.MainPath}/meta";
+                var key = GenFinalKey((byte[])dbKey.Clone());
+                MetaEntries = ReadMetaFromEncryptedDb(dbPath, key, 3);
+            }
+#else
             try
             {
                 metaDb.Open();
@@ -104,17 +114,11 @@ public class UmaDatabaseController
             }
             catch (Exception)
             {
-                try
-                {
-                    var dbPath = $@"{Config.Instance.MainPath}/meta";
-                    var key = GenFinalKey((byte[])dbKey.Clone());
-                    MetaEntries = ReadMetaFromEncryptedDb(dbPath, key, 3);
-                }
-                catch (Exception)
-                {
-                    throw;
-                }
+                var dbPath = $@"{Config.Instance.MainPath}/meta";
+                var key = GenFinalKey((byte[])dbKey.Clone());
+                MetaEntries = ReadMetaFromEncryptedDb(dbPath, key, 3);
             }
+#endif
 #endif
 
 
