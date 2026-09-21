@@ -324,6 +324,17 @@ public class CliExporter : MonoBehaviour
                 Debug.Log($"CLI_EXPORT: registered {rec.ExtraBoneCount} baked spring tracks");
             }
             yield return null;            // one frame so the animator is posed at t=0
+            {
+                // Which animator state the capture actually starts in. LoadAnimation chains the
+                // previous clip's _e and this clip's _s ahead of the loop, so a time-based
+                // warm-up can still be inside those.
+                var an = container.UmaAnimator; var st = an.GetCurrentAnimatorStateInfo(0);
+                string stName = "?";
+                foreach (var cand in new[] { "motion_1", "motion_2", "motion_s", "motion_e", "motion_t", "motion_p" })
+                    if (st.IsName(cand)) stName = cand;
+                string Clip(string k) { var c = container.OverrideController[k]; return c == null ? "-" : $"{c.name.Substring(c.name.LastIndexOf('/') + 1)}[{c.length:F2}s]"; }
+                Debug.Log($"CLI_STATE: capture starts in {stName} t={st.normalizedTime:F2} len={st.length:F2}s transition={an.IsInTransition(0)} clip_1={Clip("clip_1")} clip_2={Clip("clip_2")} clip_s={Clip("clip_s")} clip_e={Clip("clip_e")}");
+            }
             rec.StartRecording();
             // Capture a full period plus a small margin so frame P (== phase 0 of the
             // next cycle) is present; the loop trim below keeps exactly one period.
