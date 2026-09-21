@@ -14,9 +14,10 @@ public static class HeadlessWebBuild
     {
         bool release = Environment.GetCommandLineArgs().Contains("-umaRelease");
 
-        // Unique per build so WebGL data caching (below) invalidates on every rebuild: a new
-        // deploy re-downloads once, and local rebuilds never serve a stale cached Build/Web.data.
-        PlayerSettings.bundleVersion = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
+        // Bake the 7-char git SHA in as the version, so a build is traceable to its commit and
+        // WebGL data caching (below) invalidates per commit. A dirty tree shares its commit SHA,
+        // so append a timestamp there to keep local rebuilds from serving a stale cached .data.
+        PlayerSettings.bundleVersion = BuildVersion();
 
         PlayerSettings.WebGL.template = "PROJECT:UmaViewer";
         // Decompress gzipped build files in the loader so any static host works, even one
@@ -53,5 +54,32 @@ public static class HeadlessWebBuild
         }
         Debug.Log($"BUILD_OK path={s.outputPath} sizeBytes={s.totalSize}");
         EditorApplication.Exit(0);
+    }
+
+    static string BuildVersion()
+    {
+        string sha = Git("rev-parse --short=7 HEAD");
+        if (string.IsNullOrEmpty(sha)) return "0000000";
+        bool dirty = !string.IsNullOrEmpty(Git("status --porcelain"));
+        return dirty ? $"{sha}.{DateTime.UtcNow:yyyyMMddHHmmss}" : sha;
+    }
+
+    static string Git(string args)
+    {
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("git", args)
+            {
+                WorkingDirectory = System.IO.Path.GetDirectoryName(Application.dataPath),
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            using var p = System.Diagnostics.Process.Start(psi);
+            string outp = p.StandardOutput.ReadToEnd().Trim();
+            p.WaitForExit();
+            return outp;
+        }
+        catch { return ""; }
     }
 }
