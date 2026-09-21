@@ -14,8 +14,12 @@ public static class WebFileMount
     [DllImport("__Internal")] private static extern int UmaFS_IsMounted(string path);
     [DllImport("__Internal")] private static extern int UmaFS_BeginMount(string path);
     [DllImport("__Internal")] private static extern int UmaFS_PollMount(int id);
+    [DllImport("__Internal")] private static extern void UmaFS_ChangeFolder();
 
     public static bool Active => true;
+
+    // Let the browser pick a new data folder, remember it, and reload (see the template).
+    public static void ChangeDataFolder() => UmaFS_ChangeFolder();
 
     public static IEnumerator Ensure(string path)
     {
@@ -32,5 +36,6 @@ public static class WebFileMount
     public static bool Active => false;
     public static IEnumerator Ensure(string path) { yield break; }
     public static IEnumerator EnsureMany(IEnumerable<string> paths) { yield break; }
+    public static void ChangeDataFolder() { }
 #endif
 }

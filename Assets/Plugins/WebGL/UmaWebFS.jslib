@@ -55,4 +55,10 @@ mergeInto(LibraryManager.library, {
     if (s !== 0) delete UmaFSState.reqs[id];
     return s;
   },
+
+  // The app's "Change DataPath" button routes here; the template picks a new folder, stores the
+  // handle, and reloads.
+  UmaFS_ChangeFolder: function () {
+    if (window.umaPickAndReload) window.umaPickAndReload();
+  },
 });

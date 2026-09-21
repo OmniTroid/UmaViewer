@@ -145,6 +145,17 @@
       function saveHandle(h) { return idb(function (s) { return s.put(h, IDB_KEY); }); }
       function loadHandle() { return idb(function (s) { return s.get(IDB_KEY); }); }
 
+      // Called from the running app's "Change DataPath" button (via UmaFS_ChangeFolder in the
+      // jslib): pick a new folder, remember it, and reload so the app re-inits on the new data.
+      window.umaPickAndReload = async function () {
+        if (!window.showDirectoryPicker) return;
+        try {
+          var root = await window.showDirectoryPicker({ id: 'uma-data', mode: 'read' });
+          try { await saveHandle(root); } catch (e) {}
+          location.reload();
+        } catch (e) { /* AbortError: user cancelled the picker */ }
+      };
+
       function start(handle) {
         window.__umaFS = { root: handle, rootPrefix: '/uma/', ready: true };
         pickBtn.disabled = true;
