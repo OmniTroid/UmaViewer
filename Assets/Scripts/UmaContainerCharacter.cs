@@ -282,7 +282,7 @@ public class UmaContainerCharacter : UmaContainer
                 // GLES3 compile) yet have no usable variant at render, so rebind by name
                 // unconditionally to the in-project shader.
                 bool needsSwap = mat != null && mat.shader != null &&
-                    (WebFileMount.Active || !mat.shader.isSupported);
+                    (Application.platform == RuntimePlatform.WebGLPlayer || !mat.shader.isSupported);
                 if (needsSwap)
                 {
                     var repl = Shader.Find(mat.shader.name);

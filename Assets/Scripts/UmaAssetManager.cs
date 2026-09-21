@@ -256,7 +256,7 @@ public class UmaAssetManager : MonoBehaviour
 
         try
         {
-            if (WebFileMount.Active)
+            if (Application.platform == RuntimePlatform.WebGLPlayer)
             {
                 // WebGL rejects Standalone-target bundles; patch the target byte and load from
                 // memory (the decrypt happens up front rather than through a stream).
