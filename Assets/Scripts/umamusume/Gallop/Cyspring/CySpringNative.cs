@@ -23,6 +23,25 @@ namespace Gallop
         public NativeClothWorking _clothWorking;
         public static float SpringRate = 1.0f;
 
+        // Probe the native plugin once at startup: a zero-work call (nCond = 0) forces the DLL
+        // to load without touching memory. If it can't load (missing/wrong-arch, e.g. no plugin
+        // outside Windows), fall back to the managed CySpringSolver for the rest of the session.
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        private static void ProbeNativePlugin()
+        {
+            if (!isNative) return; // already managed (WebGL, or set by the caller)
+            try
+            {
+                NativeClothUpdate(IntPtr.Zero, 0, IntPtr.Zero, IntPtr.Zero,
+                    0f, 0f, 0f, 0f, 0f, 0f, 0f, false, 1f, false, 1f, 1f, 1f);
+            }
+            catch (Exception e)
+            {
+                isNative = false;
+                Debug.LogWarning("[CySpring] native plugin not loadable (" + e.GetType().Name + "); using the managed C# solver.");
+            }
+        }
+
 
         public static bool UseNativePlugin
         {
