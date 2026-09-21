@@ -107,7 +107,9 @@ public class UISettingsModel : MonoBehaviour
             var path = StandaloneFileBrowser.SaveFilePanel("Save PMX File", Config.Instance.MainPath, $"{entry.Id}_{entry.GetName()}", "pmx");
             if (!string.IsNullOrEmpty(path))
             {
-                ModelExporter.ExportModel(container, path);
+                // Baked physics, like the motion exports: spring bones are plain bones the
+                // exported VMDs animate, not rigid bodies for the runtime to simulate.
+                MotionExporter.ExportModel(container, path, bakePhysics: true);
             }
         }
 

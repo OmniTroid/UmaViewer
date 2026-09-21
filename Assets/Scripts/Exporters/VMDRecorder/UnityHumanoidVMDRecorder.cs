@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using UnityEngine;
 using System.IO;
 using System;
@@ -270,6 +270,11 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
     /// while recording keeps TrimLoop and loopify_vmd.py looking at 30fps frame numbers, which
     /// is what a VMD frame number means.
     public int WriteStride = 1;
+
+    /// Camera keys to write into this VMD's camera section, as finished 61-byte VMD camera
+    /// records (frame, distance, position, rotation, interpolation, fov, perspective), already
+    /// numbered the way the bone frames will be after any trim. Empty = no camera track.
+    public List<byte[]> CameraFrames = new List<byte[]>();
 
     private void FixedUpdate()
     {
@@ -784,8 +789,9 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
                 Debug.Log($"VMD Morph frames written: {morphWritten}");
 
                 //カメラの書き込み
-                byte[] cameraFrameCount = BitConverter.GetBytes(0);
+                byte[] cameraFrameCount = BitConverter.GetBytes(CameraFrames.Count);
                 binaryWriter.Write(cameraFrameCount, 0, intByteLength);
+                foreach (var rec in CameraFrames) binaryWriter.Write(rec, 0, rec.Length);
 
                 //照明の書き込み
                 byte[] lightFrameCount = BitConverter.GetBytes(0);

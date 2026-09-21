@@ -5,8 +5,9 @@ using UnityEngine;
 ///
 /// Rebind clears every animated bone to the default pose (InitBoneTransform covers only the
 /// body-skinned bones, so without it any other bone keeps whatever was last animated), then
-/// ResetBodyPose/UpBodyReset put the body bones at their runtime positions, then the upper arms
-/// are lowered into the standard MMD A-pose so the result plays on standard models too.
+/// ResetBodyPose/UpBodyReset put the body bones at their runtime positions, the upper arms
+/// are lowered into the standard MMD A-pose so the result plays on standard models too, and
+/// the CySpring bones go to their initialization rest.
 public static class MMDRestPose
 {
     /// Standard MMD models hold the upper arm this far below horizontal (Miku: 31 deg).
@@ -27,6 +28,9 @@ public static class MMDRestPose
         container.UpBodyReset();
         LowerArm(container.transform, "Arm_L", "Elbow_L");
         LowerArm(container.transform, "Arm_R", "Elbow_R");
+        // Spring bones are not animated, so Rebind leaves them wherever the simulation was;
+        // put them at the rest CySpring measured, which baked tracks are relative to.
+        container.ResetSpringBonesToRest();
         return wasEnabled;
     }
 

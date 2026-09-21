@@ -7,8 +7,9 @@ using System.Text;
 using System.Globalization;
 using UnityEngine;
 
-// Headless export mode: reuses the in-app exporters to write a PMX (+textures) and
-// a VMD for babylon-mmd, driven by command-line args. Enabled by --export.
+// Headless export mode: writes a PMX (+textures) via ModelExporter and a VMD via
+// MotionExporter (shared with the GUI's Export section), driven by command-line args.
+// Enabled by --export.
 //
 //   UmaViewer -batchmode --export \
 //     --data-path /path/to/Persistent --chara 1127 --costume 00 \
@@ -103,7 +104,7 @@ public class CliExporter : MonoBehaviour
         Directory.CreateDirectory(outDir);
 
         Exception buildErr = null;
-        yield return RunSafe(UmaViewerBuilder.Instance.LoadUma(chara, costume, false, ""), e => buildErr = e);
+        yield return MotionExporter.RunSafe(UmaViewerBuilder.Instance.LoadUma(chara, costume, false, ""), e => buildErr = e);
         if (buildErr != null) { Fail("LoadUma threw: " + buildErr); yield break; }
         var container = UmaViewerBuilder.Instance.CurrentUMAContainer;
         if (container == null) { Fail("character build produced no container"); yield break; }
@@ -149,6 +150,14 @@ public class CliExporter : MonoBehaviour
             Quit(0); yield break;
         }
 
+        // --probe <name>: describe a motion (parts, companions, lengths) and quit. See MotionProbe.
+        string probeName = Opt("--probe");
+        if (!string.IsNullOrEmpty(probeName))
+        {
+            Debug.Log("CLI_PROBE\n" + MotionProbe.Describe(MotionProbe.Probe(main, probeName)));
+            Quit(0); yield break;
+        }
+
         // --list-anims <substring>: print the motion assets whose name contains the substring.
         // Asset names are not guessable -- a character often has both a generic type00 motion
         // and its own chr<id> variant, and picking the wrong one exports a different animation
@@ -177,7 +186,7 @@ public class CliExporter : MonoBehaviour
             Gallop.CySpringDiff.CollideMode = Opt("--solver-diff-collide-mode", "");
             if (collideScale != 1f) Debug.Log($"CLI_EXPORT: solver-diff scaling collider radii by {collideScale}");
             Gallop.CySpringDiff.Armed = true;
-            yield return RunSafe(RecordPhysicsRef(container, main, animId, diffPath + ".ref.json"), e => buildErr = e);
+            yield return MotionExporter.RunSafe(RecordPhysicsRef(container, main, animId, diffPath + ".ref.json"), e => buildErr = e);
             Gallop.CySpringDiff.Armed = false;
             if (buildErr != null) { Fail("solver-diff threw: " + buildErr); yield break; }
             Debug.Log($"CLI_BRANCH clampCalls={Gallop.CySpringSolver.ClampCalls} clampBites={Gallop.CySpringSolver.ClampBites} collCalls={Gallop.CySpringSolver.CollisionCalls} collHits={Gallop.CySpringSolver.CollisionHits} sphere={Gallop.CySpringSolver.HitSphere} capMid={Gallop.CySpringSolver.HitCapsuleMid} capEnd={Gallop.CySpringSolver.HitCapsuleEnd} plane={Gallop.CySpringSolver.HitPlane} inner={Gallop.CySpringSolver.SeenInner} skipChara={Gallop.CySpringSolver.SkipChara} skirtKnee={Gallop.CySpringSolver.SkirtKneeHits}");
@@ -196,7 +205,7 @@ public class CliExporter : MonoBehaviour
         if (!string.IsNullOrEmpty(physRefPath))
         {
             if (!string.IsNullOrEmpty(tracePath)) { Gallop.CySpringTrace.Reset(); Gallop.CySpringTrace.Armed = true; }
-            yield return RunSafe(RecordPhysicsRef(container, main, animId, physRefPath), e => buildErr = e);
+            yield return MotionExporter.RunSafe(RecordPhysicsRef(container, main, animId, physRefPath), e => buildErr = e);
             if (buildErr != null) { Fail("physics-ref threw: " + buildErr); yield break; }
             if (!string.IsNullOrEmpty(tracePath)) { Gallop.CySpringTrace.Armed = false; Gallop.CySpringTrace.Write(tracePath); }
             Debug.Log($"CLI_BRANCH clampCalls={Gallop.CySpringSolver.ClampCalls} clampBites={Gallop.CySpringSolver.ClampBites} collCalls={Gallop.CySpringSolver.CollisionCalls} collHits={Gallop.CySpringSolver.CollisionHits} sphere={Gallop.CySpringSolver.HitSphere} capMid={Gallop.CySpringSolver.HitCapsuleMid} capEnd={Gallop.CySpringSolver.HitCapsuleEnd} plane={Gallop.CySpringSolver.HitPlane} inner={Gallop.CySpringSolver.SeenInner} skipChara={Gallop.CySpringSolver.SkipChara} skirtKnee={Gallop.CySpringSolver.SkirtKneeHits}");
@@ -211,195 +220,33 @@ public class CliExporter : MonoBehaviour
         string pmxPath = Path.Combine(outDir, WithExtension(Opt("--pmx-name"), $"chr{charaId}_{costume}", ".pmx"));
         if (!noModel)
         {
-            ModelExporter.BakeSpringBones = bakePhysics;
-            try { ModelExporter.ExportModel(container, pmxPath); }
+            try { MotionExporter.ExportModel(container, pmxPath, bakePhysics); }
             catch (Exception ex) { Fail("PMX export threw: " + ex); yield break; }
             Debug.Log("CLI_EXPORT: wrote " + pmxPath);
         }
 
-        // Spring bones and the pose the PMX was written in. ExportModel disables physics and
-        // leaves the model at rest, which is exactly the bind pose a VMD rotation is relative
-        // to, so capture it here -- by the time the recorder exists the animation has moved on.
-        var springBind = new Dictionary<string, Quaternion>();
-        var springXf = new Dictionary<string, Transform>();
-        if (bakePhysics)
-        {
-            foreach (var tr in container.GetComponentsInChildren<Transform>(true))
-            {
-                if (!SpringBoneNames.IsSpringBone(tr.name) || springXf.ContainsKey(tr.name)) continue;
-                springXf[tr.name] = tr;
-                springBind[tr.name] = tr.localRotation;
-            }
-            // Physics is off after the PMX export; baking needs it running to record.
-            container.EnablePhysics = true;
-            container.SetDynamicBoneEnable(true);
-            Debug.Log($"CLI_EXPORT: baking {springXf.Count} spring bones (PMX written without rigid bodies)");
-        }
-
-        // --- VMD (one animation) ---
+        // --- VMD (one animation) --- see MotionExporter for the capture itself
         if (!string.IsNullOrEmpty(animId))
         {
-            var anim = main.AbMotions.FirstOrDefault(e => e.Name == animId)
-                    ?? main.AbMotions.FirstOrDefault(e => e.Name.Contains(animId));
-            if (anim != null && anim.Name != animId)
-            {
-                // A substring match is a guess. Say so loudly: it silently exports a different
-                // animation than the one asked for, which looks like a version mismatch later.
-                int alts = main.AbMotions.Count(e => e.Name.Contains(animId));
-                Debug.LogWarning($"CLI_EXPORT: '{animId}' is not an exact asset name; using '{anim.Name}'"
-                               + (alts > 1 ? $" -- {alts} assets match, see --list-anims" : ""));
-            }
-            if (anim != null) Debug.Log("CLI_EXPORT: motion asset = " + anim.Name);
+            var anim = MotionExporter.FindMotion(main, animId, out string note);
+            if (note != null) Debug.LogWarning("CLI_EXPORT: " + note);
             if (anim == null) { Fail($"animation '{animId}' not found"); yield break; }
+            Debug.Log("CLI_EXPORT: motion asset = " + anim.Name);
 
-            AnimationClip clip = null;
-            try { clip = anim.Get<AnimationClip>(); } catch { }
-            container.LoadAnimation(anim);
-            // LoadAnimation files _s/_e clips into the transition slots without playing them:
-            // in the viewer they only run inside a loop's chain (idle _e -> clip _s -> loop).
-            // Recording one on its own plays it directly, below, once the recorder is running.
-            bool playDirect = clip != null && (clip.name.EndsWith("_s") || clip.name.EndsWith("_e"));
-            // Head/eye look-at (FinalIK) aims at a camera-following target; headless
-            // that target is arbitrary and won't loop, so the head pops. Export the
-            // raw animation and let the consumer add look-at themselves.
-            container.SetHeadTracking(false);
-            container.EnableEyeTracking = false;
-            float len = (clip != null && clip.length > 0.01f) ? clip.length : 5f;
-            bool isLoop = animId.Contains("loop") || (clip != null && clip.name.Contains("loop"));
-            Debug.Log($"CLI_CLIP: {anim.Name} length={len:F3}s ({Mathf.RoundToInt(len * 30f)} frames at 30fps) loop={isLoop}");
-
-            // Deterministic capture: lock game time to a fixed 1/30 step (frame count and
-            // pose sampling no longer depend on wall-clock speed), and force the job system
-            // single-threaded so parallel animation/physics FP reductions are bit-stable
-            // (their thread-order otherwise jitters poses ~0.3 deg run to run). Restored after.
-            int prevCapture = Time.captureFramerate;
-            float prevFixed = Time.fixedDeltaTime;
-            int prevWorkers = Unity.Jobs.LowLevel.Unsafe.JobsUtility.JobWorkerCount;
-            // CySpring's constants are per-step, so its output depends strongly on the rate
-            // it is stepped at: the same run baked at 30 instead of the game's 60 moves the
-            // tail bones ~46 deg on average. Render at that rate so FixedUpdate, and with it
-            // SaveFrame and the simulation, run at it too, then drop the extra frames when
-            // writing (WriteStride) so the file is still a 30fps track. Note the recorder's
-            // Initialize() assigns Time.fixedDeltaTime itself, so rec.FixedStep has to carry
-            // the rate rather than setting Time.fixedDeltaTime before it.
-            int.TryParse(Opt("--physics-fps", "60"), out int recFps);
-            if (recFps != 60) recFps = 30;
-            Time.captureFramerate = recFps;
-            Time.fixedDeltaTime = 1f / recFps;
-            var springCtrl = container.GetComponentInChildren<Gallop.CySpringController>(true);
-            bool prevSpringMode = springCtrl != null && springCtrl.Is60FpsMode;
-            if (springCtrl != null) springCtrl.Is60FpsMode = (recFps == 60);
-            Unity.Jobs.LowLevel.Unsafe.JobsUtility.JobWorkerCount = 0;
-
-            // For a loop, let the crossfade finish and the motion settle so frame 0
-            // matches where the loop ends (warming whole periods also starts capture
-            // at the clip's own phase 0); otherwise the bind->idle blend makes the
-            // seam pop. Non-loop clips are recorded from the start.
-            if (isLoop)
+            var opt = new MotionExporter.Options
             {
-                // --warmup N: settle for N whole animation periods before capturing. The
-                // skeleton is periodic from the first loop, but the spring chains are damped
-                // oscillators driven by it and need several periods to fall into the orbit
-                // that repeats with the animation. Too few and the recorded cloth does not
-                // close: frame 0 and frame P disagree, which shows up once per tile.
-                // Default 2 is the long-standing behaviour and measurement says it is enough:
-                // sweeping 2/4/8/16/32 periods moved the cloth wrap by under half a degree,
-                // so the chains have already settled by two. The knob exists for diagnosis.
-                float.TryParse(Opt("--warmup", "2"), out float warmPeriods);
-                if (warmPeriods < 1f) warmPeriods = 1f;
-                float warm = 0f, warmTarget = Mathf.Max(1.5f, len * warmPeriods);
-                Debug.Log($"CLI_EXPORT: warming {warmPeriods:0.#} periods ({warmTarget:0.00}s) before capture");
-                while (warm < warmTarget) { warm += Time.deltaTime; yield return null; }
-
-                // Phase alignment. LoadAnimation plays the previous clip's _e and this clip's _s
-                // ahead of the loop, which shifts the loop's phase against wall time, so the
-                // warm-up alone does not land on phase 0. Wait until the loop itself is playing,
-                // then until it is alignLead frames from wrapping: the first kept VMD frame
-                // (recorded frame 2, after the transient frame 0 is dropped and 60fps frames
-                // are written in pairs) is captured that many frames after this loop ends
-                // (measured: CLI_PHASE below reports where it landed).
-                var an = container.UmaAnimator;
-                int.TryParse(Opt("--align-lead", "3"), out int alignLead);
-                float step = Time.deltaTime / len;
-                for (int guard = 0; guard < 100000; guard++)
-                {
-                    var infos = an.GetCurrentAnimatorClipInfo(0);
-                    bool inLoop = !an.IsInTransition(0) && infos.Length > 0 && infos[0].clip != null
-                                  && infos[0].clip.name.EndsWith(anim.Name.Substring(anim.Name.LastIndexOf('/') + 1));
-                    if (inLoop)
-                    {
-                        float frac = an.GetCurrentAnimatorStateInfo(0).normalizedTime % 1f;
-                        if (Mathf.Abs(frac + alignLead * step - 1f) <= step * 0.5f + 1e-5f) break;
-                    }
-                    yield return null;
-                }
-            }
-
-            var rootbone = container.transform.Find("Position");
-            var rec = rootbone.gameObject.AddComponent<UnityHumanoidVMDRecorder>();
-            rec.FixedStep = 1f / recFps;     // Initialize() applies it; it hardcodes 1/30 otherwise
-            rec.KeyReductionLevel = 1;       // every frame is a real sample; the default 2 keys the body at 15fps
-            rec.Initialize();
-            rec.WriteStride = recFps / 30;   // 60fps steps -> one 30fps VMD frame per two
-            Debug.Log($"CLI_EXPORT: stepping physics at {recFps}fps, writing every {rec.WriteStride} frame(s)");
-            if (bakePhysics)
-            {
-                // Short names so each track fits the VMD's 15-byte field and matches the PMX
-                // primary name ModelExporter wrote for the same bone.
-                var shortNames = SpringBoneNames.BuildMap(springXf.Keys);
-                foreach (var kv in shortNames)
-                    rec.AddExtraBone(kv.Value, springXf[kv.Key], springBind[kv.Key]);
-                Debug.Log($"CLI_EXPORT: registered {rec.ExtraBoneCount} baked spring tracks");
-            }
-            yield return null;            // one frame so the animator is posed at t=0
-            {
-                // Which animator state the capture actually starts in. LoadAnimation chains the
-                // previous clip's _e and this clip's _s ahead of the loop, so a time-based
-                // warm-up can still be inside those.
-                var an = container.UmaAnimator; var st = an.GetCurrentAnimatorStateInfo(0);
-                string stName = "?";
-                foreach (var cand in new[] { "motion_1", "motion_2", "motion_s", "motion_e", "motion_t", "motion_p" })
-                    if (st.IsName(cand)) stName = cand;
-                string Clip(string k) { var c = container.OverrideController[k]; return c == null ? "-" : $"{c.name.Substring(c.name.LastIndexOf('/') + 1)}[{c.length:F2}s]"; }
-                Debug.Log($"CLI_STATE: capture starts in {stName} t={st.normalizedTime:F2} len={st.length:F2}s transition={an.IsInTransition(0)} clip_1={Clip("clip_1")} clip_2={Clip("clip_2")} clip_s={Clip("clip_s")} clip_e={Clip("clip_e")}");
-            }
-            rec.StartRecording();
-            // Capture a full period plus a small margin so frame P (== phase 0 of the
-            // next cycle) is present; the loop trim below keeps exactly one period.
-            // --seconds overrides this to record raw for external loop-finding.
-            float recLen = recordSeconds > 0f ? recordSeconds : (isLoop ? len + 0.1f : len);
-            if (playDirect) recLen += 2f * Time.deltaTime;
-            float e2 = 0f;
-            for (int i = 0; e2 < recLen; i++)
-            {
-                // Recorded frame k is captured in the FixedUpdate before iteration k+1 and the
-                // first kept VMD frame is recorded frame 2, so a clip started here, at
-                // iteration 2, has its frame 0 captured as that first kept frame.
-                if (playDirect && i == 2)
-                {
-                    container.OverrideController["clip_2"] = clip;
-                    container.UmaAnimator.Play("motion_2", 0, 0);
-                }
-                if (i == 3)   // recorded frame 2 (the first kept VMD frame) is captured in the FixedUpdate before this iteration
-                    Debug.Log($"CLI_PHASE: first kept frame at clip phase {container.UmaAnimator.GetCurrentAnimatorStateInfo(0).normalizedTime % 1f:F4}");
-                e2 += Time.deltaTime; yield return null;
-            }
-            rec.StopRecording();
-            Time.captureFramerate = prevCapture;
-            Time.fixedDeltaTime = prevFixed;
-            if (springCtrl != null) springCtrl.Is60FpsMode = prevSpringMode;
-            Unity.Jobs.LowLevel.Unsafe.JobsUtility.JobWorkerCount = prevWorkers;
+                BakePhysics = bakePhysics, RecordSeconds = recordSeconds, DropMouth = dropMouth, AddBlink = addBlink,
+                IncludeCamera = !Flag("--no-camera"),   // a _cam companion is recorded into the same VMD unless told not to
+            };
+            int.TryParse(Opt("--physics-fps", "60"), out opt.PhysicsFps);
+            float.TryParse(Opt("--warmup", "2"), out opt.WarmupPeriods);
+            int.TryParse(Opt("--align-lead", "3"), out opt.AlignLead);
             // Defaults to the model's stem so a model/motion pair stays matched.
             string vmdPath = Path.Combine(outDir, WithExtension(Opt("--vmd-name"), Path.GetFileNameWithoutExtension(pmxPath), ".vmd"));
-            try { rec.SaveVMD(Path.GetFileNameWithoutExtension(pmxPath), vmdPath); }
-            catch (Exception ex) { Fail("VMD save threw: " + ex); yield break; }
-            // Drop the recorder's transient first frame (a stale pose at capture start).
-            // For a loop, keep exactly frames 1..P (P = one period) so the seam is a
-            // single step regardless of how fast the motion is; the wrap is phase0<-phaseP-1.
-            // With --seconds we keep everything (raw multi-period capture).
-            int period = (recordSeconds > 0f || !isLoop) ? int.MaxValue : Mathf.RoundToInt(len * 30f);
-            try { TrimLoop(vmdPath, period, dropMouth, addBlink); }
-            catch (Exception ex) { Debug.LogWarning("CLI_EXPORT: loop trim skipped: " + ex); }
+            Exception recErr = null;
+            yield return MotionExporter.RunSafe(
+                MotionExporter.Record(container, anim, vmdPath, Path.GetFileNameWithoutExtension(pmxPath), opt), e => recErr = e);
+            if (recErr != null) { Fail("VMD export threw: " + recErr); yield break; }
             Debug.Log("CLI_EXPORT: wrote " + vmdPath);
         }
 
@@ -407,112 +254,6 @@ public class CliExporter : MonoBehaviour
         Quit(0);
     }
 
-    // Standard MMD mouth-shape morphs, dropped by --no-mouth so a viewer can drive
-    // lip-sync live. Expression morphs (笑い/怒り/まばたき…) are kept.
-    static readonly string[] MouthMorphs =
-        { "あ", "い", "う", "え", "お", "あ2", "い2", "う2", "え2", "お2", "▲", "□" };
-
-    // Drop the transient frame 0 and keep frames 1..period, renumbered to 0..period-1,
-    // for the bone and morph sections; camera/light/shadow/IK sections are copied as-is.
-    // A non-loop clip passes period=int.MaxValue (keep every frame after 0).
-    // dropMouth removes mouth morphs; addBlink replaces any blink track with one periodic
-    // blink over the loop.
-    static void TrimLoop(string path, int period, bool dropMouth, bool addBlink)
-    {
-        var enc = ShiftJisOrUtf8();
-        byte[] d = File.ReadAllBytes(path);
-        var outp = new List<byte>(d.Length);
-        outp.AddRange(new ArraySegment<byte>(d, 0, 50)); // header(30) + model name(20)
-        int o = 50;
-        int maxFrame = 0;
-        o = TrimBones(d, o, period, outp, ref maxFrame);
-        o = TrimMorphs(d, o, period, dropMouth, addBlink, maxFrame, enc, outp);
-        outp.AddRange(new ArraySegment<byte>(d, o, d.Length - o)); // remaining sections
-        File.WriteAllBytes(path, outp.ToArray());
-    }
-
-    static System.Text.Encoding ShiftJisOrUtf8()
-    {
-        try { return System.Text.Encoding.GetEncoding("shift_jis"); }
-        catch { return System.Text.Encoding.UTF8; }
-    }
-
-    // Bone section (111-byte records, frame at offset 15): keep 1<=frame<=period,
-    // renumber frame-1; report the highest kept (renumbered) frame.
-    static int TrimBones(byte[] d, int o, int period, List<byte> outp, ref int maxFrame)
-    {
-        int count = BitConverter.ToInt32(d, o); o += 4;
-        var kept = new List<byte[]>(count);
-        for (int i = 0; i < count; i++, o += 111)
-        {
-            uint fr = BitConverter.ToUInt32(d, o + 15);
-            if (fr < 1 || fr > (uint)period) continue;
-            var r = new byte[111];
-            Array.Copy(d, o, r, 0, 111);
-            uint nf = fr - 1;
-            Array.Copy(BitConverter.GetBytes(nf), 0, r, 15, 4);
-            if (nf > (uint)maxFrame) maxFrame = (int)nf;
-            kept.Add(r);
-        }
-        outp.AddRange(BitConverter.GetBytes(kept.Count));
-        foreach (var r in kept) outp.AddRange(r);
-        return o;
-    }
-
-    // Morph section (23-byte records: 15-byte name, 4-byte frame, 4-byte weight). Same
-    // keep/renumber as bones, minus mouth morphs (dropMouth) and any existing blink when
-    // addBlink is set; a synthesized periodic blink is then appended.
-    static int TrimMorphs(byte[] d, int o, int period, bool dropMouth, bool addBlink,
-                          int maxFrame, System.Text.Encoding enc, List<byte> outp)
-    {
-        byte[] blinkName = enc.GetBytes("まばたき");
-        int count = BitConverter.ToInt32(d, o); o += 4;
-        var kept = new List<byte[]>(count);
-        for (int i = 0; i < count; i++, o += 23)
-        {
-            string name = NameAt(d, o, enc);
-            uint fr = BitConverter.ToUInt32(d, o + 15);
-            if (fr < 1 || fr > (uint)period) continue;
-            if (dropMouth && Array.IndexOf(MouthMorphs, name) >= 0) continue;
-            if (addBlink && name == "まばたき") continue;
-            var r = new byte[23];
-            Array.Copy(d, o, r, 0, 23);
-            Array.Copy(BitConverter.GetBytes(fr - 1), 0, r, 15, 4);
-            kept.Add(r);
-        }
-        if (addBlink)
-            foreach (var (f, w) in BlinkKeys(maxFrame))
-                kept.Add(MorphRecord(blinkName, f, w));
-        outp.AddRange(BitConverter.GetBytes(kept.Count));
-        foreach (var r in kept) outp.AddRange(r);
-        return o;
-    }
-
-    static string NameAt(byte[] d, int o, System.Text.Encoding enc)
-    {
-        int n = 0; while (n < 15 && d[o + n] != 0) n++;
-        return enc.GetString(d, o, n);
-    }
-
-    // One 0->1->0 blink at the loop midpoint (clamped for very short loops).
-    static (int, float)[] BlinkKeys(int maxFrame)
-    {
-        if (maxFrame < 6) return new[] { (0, 0f), (Math.Max(1, maxFrame / 2), 1f), (maxFrame, 0f) };
-        int c = maxFrame / 2;
-        return new[] { (0, 0f), (c - 2, 0f), (c, 1f), (c + 3, 0f), (maxFrame, 0f) };
-    }
-
-    static byte[] MorphRecord(byte[] name, int frame, float weight)
-    {
-        var r = new byte[23];
-        Array.Copy(name, 0, r, 0, Math.Min(name.Length, 15));
-        Array.Copy(BitConverter.GetBytes((uint)frame), 0, r, 15, 4);
-        Array.Copy(BitConverter.GetBytes(weight), 0, r, 19, 4);
-        return r;
-    }
-
-    // Record CySpring-simulated Sp_* bone local rotations per frame to JSON. Captures at
-    // end-of-frame (after the container's LateUpdate runs CySpring), at a fixed 1/30 step.
     static IEnumerator RecordPhysicsRef(UmaContainerCharacter container, UmaViewerMain main, string animId, string outPath)
     {
         if (string.IsNullOrEmpty(animId)) { Debug.LogError("CLI_EXPORT_FAIL: --physics-ref needs --anim"); yield break; }
@@ -580,17 +321,6 @@ public class CliExporter : MonoBehaviour
     }
 
     // Run a coroutine to completion, capturing any exception (so we can fail cleanly).
-    static IEnumerator RunSafe(IEnumerator inner, Action<Exception> onError)
-    {
-        while (true)
-        {
-            object cur;
-            try { if (!inner.MoveNext()) yield break; cur = inner.Current; }
-            catch (Exception ex) { onError(ex); yield break; }
-            yield return cur;
-        }
-    }
-
     // Pick an output filename: the caller's if given, else the generated fallback. The
     // extension is optional ("model" and "model.pmx" both work). Any directory part is
     // dropped so --out stays the only thing deciding where files land.

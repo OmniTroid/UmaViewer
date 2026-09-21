@@ -1521,6 +1521,46 @@ namespace Gallop
                 SetEnableCySpringBone(enable, rootBonePrefixArray[i], isPrefix);
         }
 
+        /// The local rotation each spring bone had when CySpring initialized: the rest the
+        /// exported PMX binds it in and a baked VMD track is relative to. Keyed by bone name.
+        public Dictionary<string, Quaternion> GetRestRotations()
+        {
+            var map = new Dictionary<string, Quaternion>();
+            ForEachBone((root, bone) =>
+            {
+                if (bone.Transform != null && !map.ContainsKey(bone.Transform.name))
+                    map[bone.Transform.name] = root.NativeArray[bone.Index].InitLocalRotation;
+            });
+            return map;
+        }
+
+        /// Put every spring bone back at that rest rotation, now, without waiting for the
+        /// simulation's own deferred reset.
+        public void ApplyRestPose()
+        {
+            ForEachBone((root, bone) =>
+            {
+                if (bone.Transform != null) bone.Transform.localRotation = root.NativeArray[bone.Index].InitLocalRotation;
+            });
+        }
+
+        private void ForEachBone(Action<CySpringRootBone, CySpringBoneBase> action)
+        {
+            if (_springArray == null) return;
+            foreach (var spring in _springArray)
+            {
+                if (spring == null || spring.RootBoneArray == null) continue;
+                foreach (var root in spring.RootBoneArray)
+                {
+                    if (root == null || root.NativeArray == null) continue;
+                    if ((uint)root.Index < (uint)root.NativeArray.Length) action(root, root);
+                    if (root.ChildBoneList == null) continue;
+                    foreach (var child in root.ChildBoneList)
+                        if (child != null && (uint)child.Index < (uint)root.NativeArray.Length) action(root, child);
+                }
+            }
+        }
+
         public void SetEnableAllCySpringBones(bool enable)
         {
             if (_springArray == null)

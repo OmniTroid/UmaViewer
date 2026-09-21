@@ -80,11 +80,47 @@ period also starts the loop at the capture start (`loopify_vmd.py --start 0`), w
 to the clip's own frame 0 (`CLI_PHASE` reports where it landed) instead of searching for the best seam.
 Without `--period`, the seam search picks the phase.
 
-A `_s` (start) or `_e` (end) clip can be recorded on its own by naming it in `--anim`. The viewer only
-plays these inside a loop's chain (previous idle `_e`, then the clip's `_s`, then the loop), so the
-exporter plays them directly; the VMD begins at the clip's frame 0, from the rest pose. `_e` clips end,
-and `_s` clips begin, in the game's shared neutral stance (hands clasped in front), which is common to
-all characters and body types.
+## What a named animation is made of
+
+Run `--probe <name>` (or open the Export section in the GUI with the animation loaded) to see it:
+
+```
+UmaViewer -batchmode --export --data-path ... --chara 1127 --probe anm_eve_chr1127_00_mot01_01_loop
+```
+
+A body motion is `anm_<kind>_<owner>_<motion>[_<variant>]_<part>`. The owner is `chr1127_00`
+(character-specific) or `type00` (shared by body type). The parts of one motion:
+
+| part | what it is |
+|---|---|
+| `_s` | start: the preanim, from the game's shared neutral stance (hands clasped in front) into the pose |
+| `_loop` | the hold, looped |
+| `_e` | end: from the pose back to the neutral stance; the viewer plays the previous motion's `_e` before the next one's `_s` |
+| `_pose` | a static hold of the final posture (same length as the loop, no movement) |
+| `_sl` | an alternate start clip; purpose unconfirmed |
+| none | a one-shot (cut-ins, race results), played start to end |
+
+Companions live in sibling folders: `_face` and `_ear` (facial), `_pos` (root motion), `_cam`
+(a scripted camera). A camera is independent of the part kind: some one-shots have one, some do
+not, loops never do. When a motion has a `_cam`, the export records it into the same VMD's camera
+section (`--no-camera` skips it). Note the viewer drops the character height scale while a camera
+clip plays, so such a motion is recorded at the base height.
+
+Any part can be exported by naming it in `--anim`. Non-loop clips are recorded from their frame 0
+to their end (the viewer only plays `_s`/`_e` inside a loop's chain; the exporter plays them
+directly). Loops are warmed up, aligned and trimmed to one period as described above.
+
+## Exporting from the GUI
+
+The settings sidebar has an **Export** section with the same exporter behind it (`MotionExporter`,
+shared with the CLI, so a file produced either way is the same):
+
+- **Export Model (PMX)** -- the loaded character, spring bones baked (no rigid bodies).
+- **Export Preanim** -- the `_s` clip of the loaded animation, when it has one.
+- **Export Loop / Export Animation** -- the loaded loop as one period, or a non-loop clip start to end, with its camera when it has one.
+
+The section shows the probe of the loaded animation. For a character emote with a build-up, export
+the preanim and the loop into the same folder and reference both from `char.ini`.
 
 The wrapper forwards `--pmx-name`, `--vmd-name` and `--bake-physics` to the player. `loopify_vmd.py` tiles every track it finds, so baked cloth survives the loop build; its `--seam-cloth` option also weighs those tracks when choosing the loop phase, which it otherwise picks from the humanoid bones alone.
 

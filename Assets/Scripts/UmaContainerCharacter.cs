@@ -957,6 +957,19 @@ public class UmaContainerCharacter : UmaContainer
         if (!IsLive || IsMini || cySpringDataContainers == null) return;
     }
 
+    /// Rest rotation of every CySpring bone (see CySpringController.GetRestRotations).
+    public Dictionary<string, Quaternion> GetSpringRestRotations()
+        => _cySpringController != null ? _cySpringController.GetRestRotations() : new Dictionary<string, Quaternion>();
+
+    /// Put the CySpring bones at their rest rotation immediately.
+    public void ResetSpringBonesToRest()
+    {
+        if (!IsMini && _cySpringController != null) _cySpringController.ApplyRestPose();
+    }
+
+    public bool IsHeadTracking
+        => IK != null && IK.solvers != null && IK.solvers.lookAt != null && IK.solvers.lookAt.IKPositionWeight > 0f;
+
     public void ResetDynamicBone()
     {
         if (IsMini)

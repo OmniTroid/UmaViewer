@@ -154,6 +154,7 @@ public class UmaViewerUI : MonoBehaviour
         UmaAssetManager.OnLoadedBundleClear += AssetSettings.LoadedAssetsClear;
         
         PoseManager.LoadLocalPoseFiles();
+        SetupExportSection();
 #if UNITY_ANDROID && !UNITY_EDITOR
         canvasScaler.referenceResolution = new Vector2(1280, 720);
 #endif
@@ -1378,6 +1379,26 @@ public class UmaViewerUI : MonoBehaviour
         {
             panel.SetActive(panel == go);
         }
+    }
+
+    // The "Export" section of the settings sidebar (UISettingsExport), built from the scene's
+    // own pieces: the header before the Screenshot section, and a button row of the Other
+    // section, placed right after Screenshot.
+    void SetupExportSection()
+    {
+        var screenshot = ScreenshotSettings != null ? ScreenshotSettings.transform : null;
+        var other = OtherSettings != null ? OtherSettings.transform : null;
+        if (screenshot == null || other == null) return;
+        int idx = screenshot.GetSiblingIndex();
+        var header = idx > 0 ? screenshot.parent.GetChild(idx - 1).GetComponent<Button>() : null;
+        var row = other.Find("UpdateDatabase");
+        if (header == null || row == null)
+        {
+            Debug.LogWarning("[UmaViewerUI] Export section templates not found; section not added.");
+            return;
+        }
+        var panel = UISettingsExport.Create(screenshot, header, row.gameObject, other);
+        Debug.Log($"[UmaViewerUI] Export section added ({panel.transform.childCount} rows)");
     }
 
     public void RecordVMD()
